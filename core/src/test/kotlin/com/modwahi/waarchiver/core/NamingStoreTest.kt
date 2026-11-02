@@ -113,3 +113,17 @@ class NamingStoreTest {
         assertTrue(all.contains("<مفتاح-محجوب>"))
     }
 }
+
+class NumberTest {
+    @org.junit.Test fun normalizeNumber() {
+        org.junit.Assert.assertEquals("967771111111", Naming.normalizeNumber("+967 771-111-111"))
+        org.junit.Assert.assertEquals("967771111111", Naming.normalizeNumber("00967771111111"))
+        org.junit.Assert.assertEquals("", Naming.normalizeNumber(null))
+    }
+
+    /** لا نستخدم ميزات regex غير مدعومة في ICU (أندرويد): (?U) و UNICODE_CHARACTER_CLASS */
+    @org.junit.Test fun noJvmOnlyRegexFlags() {
+        val src = java.io.File("src/main/kotlin").walkTopDown().filter { it.extension == "kt" }.joinToString("\n") { it.readText() }
+        org.junit.Assert.assertFalse(src.contains("(?" + "U)") || src.contains("UNICODE_" + "CHARACTER_CLASS"))
+    }
+}

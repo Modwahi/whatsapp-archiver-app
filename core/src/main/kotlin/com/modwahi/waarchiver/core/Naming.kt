@@ -158,7 +158,8 @@ object Naming {
     }
 
     fun normalizeNumber(s: String?): String {
-        var digits = (s ?: "").replace(Regex("(?U)\\D"), "")
+        // مثل \d في Python: أي رقم يونيكود (بدون regex: ICU في أندرويد لا يدعم علم Unicode الخاص بـ Java)
+        var digits = (s ?: "").filter { Character.isDigit(it) }
         if (digits.startsWith("00")) digits = digits.substring(2)
         return digits
     }
