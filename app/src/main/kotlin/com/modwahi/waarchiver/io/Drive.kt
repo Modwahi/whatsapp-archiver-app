@@ -38,7 +38,7 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
         .writeTimeout(10, TimeUnit.MINUTES)
         .build()
 
-    private var token: String? = null
+    @Volatile private var token: String? = null
 
     /** ينفّذ الطلب مع إعادة المحاولة (5xx، 429، 403 rate limit، انقطاع الشبكة) وتجديد التوكن عند 401. */
     private fun <T> call(build: (Request.Builder) -> Request.Builder, handle: (Response) -> T): T {
@@ -108,6 +108,28 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
         }
     }
 
+    /** كل محتويات مجلد (غير المحذوفة) — طلب واحد لكل 1000 عنصر بدل بحث لكل ملف. */
+    fun listChildren(parentId: String): List<DFile> {
+        val out = ArrayList<DFile>()
+        var pageToken: String? = null
+        do {
+            val url = "$API/files".toHttpUrl().newBuilder()
+                .addQueryParameter("q", "'${q(parentId)}' in parents and trashed = false")
+                .addQueryParameter("fields", "nextPageToken,files(id,name,mimeType,size,trashed)")
+                .addQueryParameter("pageSize", "1000")
+                .addQueryParameter("spaces", "drive")
+                .apply { pageToken?.let { addQueryParameter("pageToken", it) } }
+                .build()
+            pageToken = call({ it.url(url) }) { r ->
+                val o = JSONObject(r.body.string())
+                val a = o.optJSONArray("files") ?: JSONArray()
+                for (k in 0 until a.length()) out.add(parse(a.getJSONObject(k)))
+                o.optString("nextPageToken").takeIf { it.isNotEmpty() }
+            }
+        } while (pageToken != null)
+        return out
+    }
+
     fun createFolder(name: String, parentId: String?): String {
         val meta = JSONObject().put("name", name).put("mimeType", FOLDER_MIME)
         if (parentId != null) meta.put("parents", JSONArray().put(parentId))
@@ -142,19 +164,37 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
 /**
  * Uploader فوق Drive: كل المسارات نسبية لمجلد التطبيق (folder ID محفوظ).
  * المجلد يمكن نقله يدوياً لأي مكان في الدرايف: نستخدم الـ ID لا المسار.
+ *
+ * للسرعة: نقرأ محتوى كل مجلد مرة واحدة (بدل بحث لكل ملف)، ونرفع حتى 3 ملفات بالتوازي.
  */
-class DriveUploader(private val drive: DriveClient, private val rootId: String) : Uploader {
-    private val dirCache = HashMap<String, String>()
+class DriveUploader(
+    private val drive: DriveClient,
+    private val rootId: String,
+    private val onFile: ((done: Int, total: Int) -> Unit)? = null,
+) : Uploader {
+    private val dirIds = HashMap<String, String>()               // مسار نسبي ← ID
+    private val listings = HashMap<String, MutableMap<String, DriveClient.DFile>>() // ID ← (اسم ← ملف)
+    private val pool = java.util.concurrent.Executors.newFixedThreadPool(3)
 
+    @Synchronized
+    private fun children(dirId: String): MutableMap<String, DriveClient.DFile> = listings.getOrPut(dirId) {
+        drive.listChildren(dirId).associateByTo(java.util.concurrent.ConcurrentHashMap()) { it.name }
+    }
+
+    @Synchronized
     private fun dirId(relDir: String, create: Boolean): String? {
         var cur = rootId
         var path = ""
         for (part in relDir.split('/').filter { it.isNotEmpty() }) {
             path = if (path.isEmpty()) part else "$path/$part"
-            cur = dirCache[path] ?: run {
-                val found = drive.find(cur, part, folder = true)?.id
-                    ?: if (create) drive.createFolder(part, cur) else return null
-                found.also { dirCache[path] = it }
+            cur = dirIds[path] ?: run {
+                val kids = children(cur)
+                val found = kids[part]?.takeIf { it.mime == DriveClient.FOLDER_MIME }?.id
+                    ?: if (create) drive.createFolder(part, cur).also { id ->
+                        kids[part] = DriveClient.DFile(id, part, DriveClient.FOLDER_MIME, 0, false)
+                        listings[id] = java.util.concurrent.ConcurrentHashMap()
+                    } else return null
+                found.also { dirIds[path] = it }
             }
         }
         return cur
@@ -162,24 +202,41 @@ class DriveUploader(private val drive: DriveClient, private val rootId: String) 
 
     override fun readFile(relDir: String, name: String): ByteArray? {
         val dir = dirId(relDir, create = false) ?: return null
-        val f = drive.find(dir, name, folder = false) ?: return null
+        val f = children(dir)[name]?.takeIf { it.mime != DriveClient.FOLDER_MIME } ?: return null
         return drive.download(f.id)
     }
 
     override fun uploadDir(localDir: File, relDir: String) {
-        localDir.walkTopDown().filter { it.isFile }.sortedBy { it.path }.forEach { src ->
+        val files = localDir.walkTopDown().filter { it.isFile }.sortedBy { it.path }.toList()
+        val done = java.util.concurrent.atomic.AtomicInteger()
+        val jobs = files.map { src ->
             val relParent = src.parentFile!!.relativeTo(localDir).path
             val dir = dirId(listOf(relDir, relParent).filter { it.isNotEmpty() }.joinToString("/"), create = true)!!
-            val mime = mimeOf(src.name)
-            val existing = drive.find(dir, src.name, folder = false)
-            when {
-                existing == null -> drive.create(dir, src.name, src, mime)
-                // الرسائل والملخص تتغير: نحدّث المحتوى. الوسائط بنفس الاسم والحجم: موجودة، لا داعي لرفعها
-                src.name.endsWith(".json") || src.name.endsWith(".txt") || existing.size != src.length() ->
-                    drive.update(existing.id, src, mime)
+            val kids = children(dir)
+            pool.submit {
+                val mime = mimeOf(src.name)
+                val existing = kids[src.name]
+                when {
+                    existing == null -> {
+                        val id = drive.create(dir, src.name, src, mime)
+                        kids[src.name] = DriveClient.DFile(id, src.name, mime, src.length(), false)
+                    }
+                    // الرسائل والملخص تتغير: نحدّث المحتوى. الوسائط بنفس الاسم والحجم موجودة: لا داعي لرفعها
+                    src.name.endsWith(".json") || src.name.endsWith(".txt") || existing.size != src.length() ->
+                        drive.update(existing.id, src, mime)
+                }
+                onFile?.invoke(done.incrementAndGet(), files.size)
             }
         }
+        // ننتظر الكل؛ أول خطأ يُرمى كما هو (فلا تتقدم حالة المحادثة)
+        var error: Throwable? = null
+        for (j in jobs) {
+            try { j.get() } catch (e: java.util.concurrent.ExecutionException) { if (error == null) error = e.cause }
+        }
+        error?.let { throw if (it is UploadError) it else UploadError(it.message ?: it.javaClass.simpleName, it) }
     }
+
+    fun close() = pool.shutdown()
 
     private fun mimeOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
         "json" -> "application/json"

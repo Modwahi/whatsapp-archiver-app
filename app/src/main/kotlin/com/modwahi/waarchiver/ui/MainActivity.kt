@@ -17,16 +17,7 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.material3.dynamicDarkColorScheme
-import androidx.compose.material3.dynamicLightColorScheme
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.lifecycleScope
@@ -44,6 +35,8 @@ interface Actions {
     fun requestNotifications()
     fun requestLegacyStorage()
     fun openUrl(url: String)
+    fun requestContacts()
+    fun openDownloads()
 }
 
 class MainActivity : ComponentActivity(), Actions {
@@ -55,6 +48,7 @@ class MainActivity : ComponentActivity(), Actions {
     private lateinit var authResolution: ActivityResultLauncher<IntentSenderRequest>
     private lateinit var createLog: ActivityResultLauncher<String>
     private lateinit var permission: ActivityResultLauncher<String>
+    private lateinit var contactsPermission: ActivityResultLauncher<String>
     private var pendingAccount: String? = null
 
     /** مكان مجلد واتساب: Android/media/com.whatsapp/WhatsApp (يُفتح منتقي الملفات عليه مباشرة) */
@@ -87,10 +81,14 @@ class MainActivity : ComponentActivity(), Actions {
         createLog = registerForActivityResult(ActivityResultContracts.CreateDocument("text/plain")) { uri ->
             if (uri != null) launchIo { vm.message = vm.exportLogs(uri) ?: "تم تصدير السجل" }
         }
-        permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+        permission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { vm.reload() }
+        contactsPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            vm.updateImportContacts(granted)
+            if (!granted) vm.message = "لم تسمح بقراءة جهات الاتصال، فلن تُستخدم أسماؤها."
+        }
 
         setContent {
-            AppTheme {
+            AppTheme(vm.themeMode) {
                 CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                     Root(vm, this)
                 }
@@ -159,6 +157,12 @@ class MainActivity : ComponentActivity(), Actions {
         if (Build.VERSION.SDK_INT < 29) permission.launch(Manifest.permission.WRITE_EXTERNAL_STORAGE)
     }
 
+    override fun requestContacts() = contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+
+    override fun openDownloads() {
+        runCatching { startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
     override fun openUrl(url: String) {
         runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) }
     }
@@ -172,18 +176,4 @@ class OpenTree(private val readOnly: Boolean) : ActivityResultContracts.OpenDocu
                 if (readOnly) 0 else Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             if (input != null) putExtra(DocumentsContract.EXTRA_INITIAL_URI, input)
         }
-}
-
-private val Green = Color(0xFF128C7E)
-
-@Composable
-fun AppTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
-    val ctx = LocalContext.current
-    val scheme = when {
-        Build.VERSION.SDK_INT >= 31 -> if (dark) dynamicDarkColorScheme(ctx) else dynamicLightColorScheme(ctx)
-        dark -> darkColorScheme(primary = Color(0xFF25D366))
-        else -> lightColorScheme(primary = Green)
-    }
-    MaterialTheme(colorScheme = scheme, content = content)
 }

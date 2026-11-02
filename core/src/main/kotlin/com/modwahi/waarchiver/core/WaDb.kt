@@ -207,10 +207,10 @@ class WaDb(path: File, private val opener: SqlOpener) : AutoCloseable {
         return out.sortedByDescending { it.lastTimestamp }
     }
 
-    fun findChat(jid: String): ChatInfo? {
-        val chats = chatCache ?: listChats().also { chatCache = it }
-        return chats.firstOrNull { it.jid == jid }
-    }
+    /** قائمة المحادثات مرة واحدة لكل تشغيل (الاستعلام يمر على جدول الرسائل كله). */
+    fun listChatsCached(): List<ChatInfo> = chatCache ?: listChats().also { chatCache = it }
+
+    fun findChat(jid: String): ChatInfo? = listChatsCached().firstOrNull { it.jid == jid }
 
     // ---------- الرسائل ----------
     private val messageSelect: String by lazy {

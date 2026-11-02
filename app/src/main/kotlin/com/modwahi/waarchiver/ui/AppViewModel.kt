@@ -3,6 +3,7 @@ package com.modwahi.waarchiver.ui
 import android.app.Application
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,14 +11,17 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
+import com.modwahi.waarchiver.App
 import com.modwahi.waarchiver.core.Archiver
 import com.modwahi.waarchiver.core.Crypt15
 import com.modwahi.waarchiver.core.Naming
 import com.modwahi.waarchiver.data.ChatChoice
 import com.modwahi.waarchiver.data.KnownChat
 import com.modwahi.waarchiver.data.Mode
+import com.modwahi.waarchiver.io.PhoneContacts
 import com.modwahi.waarchiver.io.SafSource
 import com.modwahi.waarchiver.work.ArchiveWorker
+import com.modwahi.waarchiver.work.ChatProgress
 import com.modwahi.waarchiver.work.Engine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collectLatest
@@ -27,9 +31,12 @@ import org.json.JSONObject
 
 data class Job(val action: String, val stage: String, val pct: Int)
 
+enum class SortBy { RECENT, NAME, MESSAGES }
+
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     val engine = Engine(app)
     private val prefs get() = engine.prefs
+    private val wm = WorkManager.getInstance(app)
 
     var setupDone by mutableStateOf(prefs.setupDone); private set
     var waUri by mutableStateOf(prefs.waTreeUri); private set
@@ -43,17 +50,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var choices by mutableStateOf(prefs.choices.associateBy { it.jid }); private set
     var contacts by mutableStateOf(prefs.contacts); private set
     var lastRun by mutableStateOf(prefs.lastRun?.let { JSONObject(it) }); private set
+    var history by mutableStateOf(prefs.history); private set
+    var progressByChat by mutableStateOf<Map<String, ChatProgress>>(emptyMap()); private set
     var backupAge by mutableStateOf<Double?>(null); private set
     var job by mutableStateOf<Job?>(null); private set
+    var nextCheckAt by mutableStateOf<Long?>(null); private set
+    var batteryExempt by mutableStateOf(true); private set
+    var phoneContactsCount by mutableStateOf(0); private set
     var listError by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
-    /** نص آخر انهيار (إن وُجد) لعرضه ونسخه */
-    var crash by mutableStateOf<String?>(com.modwahi.waarchiver.App.crashFile(app).takeIf { it.exists() }?.readText())
-
-    fun dismissCrash() {
-        com.modwahi.waarchiver.App.crashFile(getApplication()).delete()
-        crash = null
-    }
+    var crash by mutableStateOf(App.crashFile(app).takeIf { it.exists() }?.readText())
 
     // الإعدادات
     var firstRunDays by mutableStateOf(prefs.firstRunDays); private set
@@ -63,16 +69,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var requireCharging by mutableStateOf(prefs.requireCharging); private set
     var requireWifi by mutableStateOf(prefs.requireWifi); private set
     var scheduleEnabled by mutableStateOf(prefs.scheduleEnabled); private set
+    var themeMode by mutableStateOf(prefs.themeMode); private set
+    var notifySuccess by mutableStateOf(prefs.notifySuccess); private set
+    var importContacts by mutableStateOf(prefs.importContacts); private set
+    var countryCode by mutableStateOf(prefs.countryCode); private set
 
     init {
-        refreshAge()
+        reload()
         viewModelScope.launch {
-            WorkManager.getInstance(app).getWorkInfosForUniqueWorkFlow(ArchiveWorker.MANUAL).collectLatest { infos ->
-                onWork(infos)
-            }
+            wm.getWorkInfosForUniqueWorkFlow(ArchiveWorker.MANUAL).collectLatest { onManual(it) }
         }
         viewModelScope.launch {
-            WorkManager.getInstance(app).getWorkInfosForUniqueWorkFlow(ArchiveWorker.PERIODIC).collectLatest { infos ->
+            wm.getWorkInfosForUniqueWorkFlow(ArchiveWorker.PERIODIC).collectLatest { infos ->
+                val p = infos.firstOrNull { !it.state.isFinished }
+                nextCheckAt = p?.nextScheduleTimeMillis?.takeIf { it > 0 && it != Long.MAX_VALUE }
                 if (job == null || job?.action == "scheduled") {
                     val running = infos.firstOrNull { it.state == WorkInfo.State.RUNNING }
                     job = running?.let { Job("scheduled", it.progress.getString("stage") ?: "تشغيل مجدول…", it.progress.getInt("pct", -1)) }
@@ -82,7 +92,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun onWork(infos: List<WorkInfo>) {
+    private fun onManual(infos: List<WorkInfo>) {
         val active = infos.firstOrNull { !it.state.isFinished }
         if (active != null) {
             val action = active.tags.firstOrNull { it in setOf("run", "dry", "list") } ?: "run"
@@ -100,12 +110,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         known = prefs.knownChats
         knownAt = prefs.knownChatsAt
         lastRun = prefs.lastRun?.let { JSONObject(it) }
+        history = prefs.history
         driveFolderId = prefs.driveFolderId
-        refreshAge()
+        batteryExempt = getApplication<Application>().getSystemService(PowerManager::class.java)
+            .isIgnoringBatteryOptimizations(getApplication<Application>().packageName)
+        viewModelScope.launch {
+            val (age, prog, count) = withContext(Dispatchers.IO) {
+                Triple(engine.backupAgeHours(), engine.chatProgress(),
+                    if (prefs.importContacts) runCatching { PhoneContacts.read(getApplication(), prefs.countryCode).size }.getOrDefault(0) else 0)
+            }
+            backupAge = age
+            progressByChat = prog
+            phoneContactsCount = count
+        }
     }
 
-    fun refreshAge() {
-        viewModelScope.launch { backupAge = withContext(Dispatchers.IO) { engine.backupAgeHours() } }
+    fun dismissCrash() {
+        App.crashFile(getApplication()).delete()
+        crash = null
     }
 
     // ---------- مجلد واتساب ----------
@@ -118,7 +140,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.waTreeUri = uri.toString()
         waUri = uri.toString()
         val b = src.backup()
-        refreshAge()
+        reload()
         if (b == null) "اخترت المجلد، لكن لم أجد ملف النسخة Databases/msgstore.db.crypt15. فعّل النسخ الاحتياطي المشفّر في واتساب ثم اضغط «نسخ احتياطي»."
         else null
     }
@@ -188,16 +210,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         saveChoices(choices + (jid to c.copy(selected = on)))
     }
 
-    fun setFolder(jid: String, folder: String) {
-        val c = choices[jid] ?: ChatChoice(jid, true)
-        saveChoices(choices + (jid to c.copy(folder = folder)))
+    fun selectAll(jids: List<String>, on: Boolean) {
+        val m = choices.toMutableMap()
+        for (j in jids) m[j] = (m[j] ?: ChatChoice(j, false)).copy(selected = on)
+        saveChoices(m)
     }
 
-    fun setOwnerName(jid: String, name: String) {
-        val num = Archiver.numberOf(jid)
+    fun setFolder(jid: String, folder: String) {
+        val c = choices[jid] ?: ChatChoice(jid, true)
+        saveChoices(choices + (jid to c.copy(folder = folder.trim())))
+    }
+
+    fun setOwnerName(jid: String, name: String) = setName(Archiver.numberOf(jid), name)
+
+    fun setName(number: String, name: String) {
+        val num = Naming.normalizeNumber(number)
         if (num.isEmpty()) return
         val m = contacts.toMutableMap()
-        if (name.isBlank()) m.remove(num) else m[num] = name
+        if (name.isBlank()) m.remove(num) else m[num] = name.trim()
         contacts = m
         prefs.contacts = m
     }
@@ -205,11 +235,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     fun displayName(c: KnownChat): String {
         if (c.subject.isNotEmpty()) return c.subject
         val num = Archiver.numberOf(c.jid)
-        return contacts[num]?.takeIf { it.isNotBlank() } ?: if (num.isNotEmpty()) "+$num" else c.jid.substringBefore('@')
+        return contacts[num]?.takeIf { it.isNotBlank() } ?: if (num.isNotEmpty()) ltr("+$num") else c.jid.substringBefore('@')
     }
 
-    /** اسم المجلد الافتراضي كما ستسميه الأداة إن تُرك الحقل فارغاً. */
+    /** اسم المجلد الذي سيُستخدم إن تُرك الحقل فارغاً (الاسم المستخدم سابقاً إن وُجد). */
     fun defaultFolder(c: KnownChat): String {
+        progressByChat[c.jid]?.folder?.takeIf { it.isNotEmpty() }?.let { return it }
         val name = c.subject.ifEmpty {
             val num = Archiver.numberOf(c.jid)
             contacts[num]?.takeIf { it.isNotEmpty() } ?: num.ifEmpty { c.jid }
@@ -217,11 +248,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         return Naming.sanitizeName(name)
     }
 
+    fun folderFor(c: KnownChat): String = choices[c.jid]?.folder?.takeIf { it.isNotEmpty() } ?: defaultFolder(c)
+
     val selectedCount get() = choices.values.count { it.selected }
 
     // ---------- التشغيل ----------
     fun runNow() = ArchiveWorker.enqueue(getApplication(), "run")
     fun dryRun() = ArchiveWorker.enqueue(getApplication(), "dry")
+
+    /** إيقاف التشغيل الجاري (اليدوي أو المجدول). الجدولة الدورية تبقى مفعّلة. */
+    fun stop() {
+        wm.cancelUniqueWork(ArchiveWorker.MANUAL)
+        if (job?.action == "scheduled") {
+            wm.cancelUniqueWork(ArchiveWorker.PERIODIC)
+            ArchiveWorker.schedule(getApplication())
+        }
+    }
 
     fun finishSetup() {
         prefs.setupDone = true
@@ -238,8 +280,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateNumbers(days: Int? = null, maxMb: Int? = null) {
-        days?.takeIf { it > 0 }?.let { prefs.firstRunDays = it; firstRunDays = it }
-        maxMb?.takeIf { it > 0 }?.let { prefs.maxMediaMb = it; maxMediaMb = it }
+        days?.takeIf { it in 1..3650 }?.let { prefs.firstRunDays = it; firstRunDays = it }
+        maxMb?.takeIf { it in 1..4096 }?.let { prefs.maxMediaMb = it; maxMediaMb = it }
     }
 
     fun updateTimezone(tz: String): Boolean {
@@ -250,6 +292,20 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun updateMeName(n: String) {
         if (n.isNotBlank()) { prefs.meName = n.trim(); meName = n.trim() }
+    }
+
+    fun updateTheme(m: Int) { prefs.themeMode = m; themeMode = m }
+    fun updateNotifySuccess(on: Boolean) { prefs.notifySuccess = on; notifySuccess = on }
+
+    fun updateImportContacts(on: Boolean) {
+        prefs.importContacts = on; importContacts = on
+        reload()
+    }
+
+    fun updateCountryCode(cc: String) {
+        val d = cc.filter { it.isDigit() }.take(4)
+        prefs.countryCode = d; countryCode = d
+        reload()
     }
 
     suspend fun exportLogs(uri: Uri): String? = withContext(Dispatchers.IO) {

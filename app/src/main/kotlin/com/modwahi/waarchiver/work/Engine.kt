@@ -8,8 +8,11 @@ import android.os.Environment
 import android.provider.MediaStore
 import com.modwahi.waarchiver.core.ArchLog
 import com.modwahi.waarchiver.core.ChatInfo
+import com.modwahi.waarchiver.core.ChatSpec
 import com.modwahi.waarchiver.core.Crypt15
 import com.modwahi.waarchiver.core.FileLog
+import com.modwahi.waarchiver.core.JObj
+import com.modwahi.waarchiver.core.Json
 import com.modwahi.waarchiver.core.Paths
 import com.modwahi.waarchiver.core.RunError
 import com.modwahi.waarchiver.core.RunLock
@@ -27,6 +30,7 @@ import com.modwahi.waarchiver.io.AndroidSql
 import com.modwahi.waarchiver.io.DriveClient
 import com.modwahi.waarchiver.io.DriveUploader
 import com.modwahi.waarchiver.io.GoogleAuth
+import com.modwahi.waarchiver.io.PhoneContacts
 import com.modwahi.waarchiver.io.SafSource
 import com.modwahi.waarchiver.io.SafUploader
 import org.json.JSONArray
@@ -35,6 +39,12 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+/** أوقف المستخدم التشغيل */
+class StoppedByUser : RuntimeException("أوقفته يدوياً")
+
+/** حالة أرشفة محادثة واحدة (من state.json) للعرض. */
+data class ChatProgress(val lastTimestamp: Long, val pendingMedia: Int, val folder: String?)
 
 /** يجمع أجزاء التشغيل: الإعدادات، المفتاح، مصدر SAF، الرافع (Drive أو محلي)، والسجلات. */
 class Engine(private val context: Context) {
@@ -71,14 +81,23 @@ class Engine(private val context: Context) {
         return id
     }
 
-    private fun uploader(): Uploader = when (prefs.mode) {
+    private class LazyUploader(private val make: () -> Uploader) : Uploader {
+        // يُجهَّز عند أول استخدام، حتى يظهر خطأ الاتصال في ملخص المحادثة كما في الأداة
+        private val holder = lazy { make() }
+        val inner by holder
+        fun closeIfOpen() { if (holder.isInitialized()) (holder.value as? DriveUploader)?.close() }
+        override fun readFile(relDir: String, name: String) = inner.readFile(relDir, name)
+        override fun uploadDir(localDir: File, relDir: String) = inner.uploadDir(localDir, relDir)
+    }
+
+    private fun uploader(progress: (String, Double?) -> Unit): Uploader = when (prefs.mode) {
         Mode.LOCAL -> SafUploader(context, Uri.parse(prefs.localTreeUri
             ?: throw RunError("لم تختر مجلد الحفظ المحلي (الإعدادات ← وجهة الحفظ).")))
-        Mode.DRIVE -> object : Uploader {
-            // يُجهَّز عند أول استخدام، حتى يظهر خطأ الاتصال في ملخص المحادثة كما في الأداة
-            private val inner by lazy { val d = driveClient(); DriveUploader(d, ensureDriveFolder(d)) }
-            override fun readFile(relDir: String, name: String) = inner.readFile(relDir, name)
-            override fun uploadDir(localDir: File, relDir: String) = inner.uploadDir(localDir, relDir)
+        Mode.DRIVE -> LazyUploader {
+            val d = driveClient()
+            DriveUploader(d, ensureDriveFolder(d)) { done, total ->
+                progress("رفع الملفات $done من $total", done.toDouble() / total)
+            }
         }
     }
 
@@ -88,9 +107,30 @@ class Engine(private val context: Context) {
         b.open().use { Crypt15.verifyKey(it, key) }
     }
 
-    fun backupAgeHours(): Double? = runCatching {
-        source().backup()?.mtime?.let { (System.currentTimeMillis() / 1000.0 - it) / 3600 }
-    }.getOrNull()
+    fun backupMtimeMs(): Long? = runCatching { source().backup()?.mtime?.let { (it * 1000).toLong() } }.getOrNull()
+
+    fun backupAgeHours(): Double? = backupMtimeMs()?.let { (System.currentTimeMillis() - it) / 3_600_000.0 }
+
+    /** الأسماء: جهات الاتصال (إن فُعّلت) ثم الأسماء التي كتبتها في التطبيق (لها الأولوية). */
+    fun contacts(): Map<String, String> {
+        val phone = if (prefs.importContacts) runCatching { PhoneContacts.read(context, prefs.countryCode) }.getOrDefault(emptyMap()) else emptyMap()
+        return phone + prefs.contacts
+    }
+
+    /** حالة كل محادثة من state.json (آخر رسالة مؤرشفة، وسائط معلّقة، اسم المجلد المستخدم). */
+    @Suppress("UNCHECKED_CAST")
+    fun chatProgress(): Map<String, ChatProgress> = runCatching {
+        val st = Json.parse(paths.state.readText()) as JObj
+        (st["chats"] as JObj).mapValues { (_, v) ->
+            val c = v as JObj
+            ChatProgress((c["last_timestamp"] as? Number)?.toLong() ?: 0, (c["pending_media"] as? List<*>)?.size ?: 0, c["folder"] as? String)
+        }
+    }.getOrDefault(emptyMap())
+
+    private fun saveKnown(chats: List<ChatInfo>) {
+        prefs.knownChats = chats.map { KnownChat(it.jid, it.subject, it.isGroup, it.messageCount, it.lastTimestamp) }
+        prefs.knownChatsAt = System.currentTimeMillis()
+    }
 
     /** يفك النسخة ويقرأ قائمة المحادثات (لشاشة المحادثات)، ثم يحذف القاعدة المفكوكة. */
     fun listChats(progress: (String, Double?) -> Unit): List<ChatInfo> = RunLock.with(paths.lock) {
@@ -98,14 +138,17 @@ class Engine(private val context: Context) {
             progress("قراءة المحادثات", null)
             db.listChats()
         }
-    }.also { chats ->
-        prefs.knownChats = chats.map { KnownChat(it.jid, it.subject, it.isGroup, it.messageCount, it.lastTimestamp) }
-        prefs.knownChatsAt = System.currentTimeMillis()
-    }
+    }.also(::saveKnown)
 
     /** التشغيل الحقيقي أو التجربة. يرجع null إن تم التخطي (لا نسخة جديدة في الوضع المجدول). */
     fun run(scheduled: Boolean, dryRun: Boolean, progress: (String, Double?) -> Unit): Pair<Summary?, String?> {
-        val cfg = prefs.archiveConfig()
+        val base = prefs.archiveConfig()
+        // اسم المجلد ثابت: إن لم تكتب اسماً نستخدم الاسم الذي استُخدم أول مرة، حتى لا يتغير المجلد
+        // لاحقاً إن أضفت اسم صاحب الرقم أو تغيّر اسم المجموعة
+        val used = chatProgress()
+        val cfg = base.copy(chats = base.chats.map { c ->
+            if (c.name.isNotEmpty()) c else ChatSpec(c.jid, used[c.jid]?.folder.orEmpty())
+        })
         val stamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.ROOT).format(Date())
         val dryDir = File(context.cacheDir, "dry/$stamp")
         val up: Uploader = if (dryRun) {
@@ -114,35 +157,42 @@ class Engine(private val context: Context) {
                 override fun readFile(relDir: String, name: String): ByteArray? = null
                 override fun uploadDir(localDir: File, relDir: String) {}
             }
-        } else uploader()
-        val summary = runArchive(cfg, paths, key(), source(), up, log, AndroidSql, prefs.contacts,
-            dryRun = dryRun, scheduled = scheduled, dryDir = if (dryRun) dryDir else null, onProgress = progress)
+        } else uploader(progress)
+        val summary = try {
+            runArchive(cfg, paths, key(), source(), up, log, AndroidSql, contacts(),
+                dryRun = dryRun, scheduled = scheduled, dryDir = if (dryRun) dryDir else null,
+                onProgress = progress, onChats = ::saveKnown)
+        } finally {
+            (up as? LazyUploader)?.closeIfOpen()
+        }
         var exported: String? = null
         if (dryRun && summary != null) {
             File(dryDir, "_ملخص التجربة.txt").writeText(summary.render())
             exported = exportToDownloads(dryDir, "أرشيف واتساب - تجربة/$stamp")
             dryDir.deleteRecursively()
         }
-        if (summary != null) saveLastRun(summary, exported)
+        if (summary != null) saveRun(summary, exported, scheduled)
         return summary to exported
     }
 
-    private fun saveLastRun(s: Summary, exported: String?) {
+    private fun saveRun(s: Summary, exported: String?, scheduled: Boolean) {
         val o = JSONObject()
             .put("time", System.currentTimeMillis())
             .put("ok", s.ok)
             .put("dry", s.dryRun)
+            .put("scheduled", scheduled)
             .put("text", s.render())
             .put("age", s.backupAgeHours ?: JSONObject.NULL)
             .put("errors", JSONArray(s.errors))
             .put("warnings", JSONArray(s.warnings))
             .put("exported", exported ?: JSONObject.NULL)
             .put("chats", JSONArray(s.chats.map {
-                JSONObject().put("name", it.name).put("messages", it.messages).put("media", it.media)
+                JSONObject().put("name", it.name).put("jid", it.jid).put("messages", it.messages).put("media", it.media)
                     .put("missing", it.mediaMissing).put("large", it.mediaTooLarge).put("recovered", it.recovered)
                     .put("error", it.error ?: JSONObject.NULL)
             }))
         prefs.lastRun = o.toString()
+        prefs.history = listOf(o) + prefs.history
     }
 
     /** ينسخ مجلد التجربة إلى Download/<sub>. يرجع المسار للعرض. */
@@ -173,6 +223,7 @@ class Engine(private val context: Context) {
     /** كل السجلات في نص واحد (للتصدير). المفتاح محجوب أصلاً في السجلات. */
     fun allLogs(): String {
         val files = paths.logs.listFiles()?.sortedBy { it.name } ?: emptyList()
-        return files.joinToString("\n") { "##### ${it.name}\n" + ArchLog.redact(it.readText()) }
+        val crash = File(context.filesDir, "last_crash.txt").takeIf { it.exists() }?.let { "##### last_crash.txt\n" + it.readText() + "\n" } ?: ""
+        return crash + files.joinToString("\n") { "##### ${it.name}\n" + ArchLog.redact(it.readText()) }
     }
 }

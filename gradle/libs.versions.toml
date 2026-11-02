@@ -34,6 +34,10 @@ play-services-auth = { module = "com.google.android.gms:play-services-auth", ver
 
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
 
+compose-ui-test = { module = "androidx.compose.ui:ui-test-junit4" }
+compose-ui-test-manifest = { module = "androidx.compose.ui:ui-test-manifest" }
+work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }

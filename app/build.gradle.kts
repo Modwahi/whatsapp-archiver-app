@@ -88,4 +88,8 @@ dependencies {
 
     testImplementation(libs.junit)
     testImplementation(libs.robolectric)
+    testImplementation(platform(libs.compose.bom))
+    testImplementation(libs.compose.ui.test)
+    testImplementation(libs.work.testing)
+    debugImplementation(libs.compose.ui.test.manifest)
 }

@@ -83,6 +83,7 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     private var lastPct = -1
 
     private suspend fun progress(stage: String, pct: Double?) {
+        if (isStopped) throw StoppedByUser()
         val p = pct?.let { (it * 100).toInt() } ?: -1
         if (pct != null && p == lastPct) return
         lastPct = p
@@ -108,6 +109,7 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                 }
                 else -> {
                     val (summary, exported) = engine.run(scheduled = action == "scheduled", dryRun = action == "dry", progress = report)
+                    if (isStopped) return@withContext Result.success() // أوقفه المستخدم: لا إشعار فشل
                     if (summary == null) {
                         checkStale(engine)
                         return@withContext Result.success()
@@ -115,10 +117,15 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     if (!summary.ok) Notifier.failure(applicationContext, summary.errors.firstOrNull()
                         ?: summary.chats.firstOrNull { it.error != null }?.let { "${it.name}: ${it.error}" } ?: "")
                     else if (action == "dry") Notifier.info(applicationContext, "اكتملت التجربة", "الناتج في $exported")
+                    else if (prefs.notifySuccess) Notifier.info(applicationContext, "تمت الأرشفة ✓",
+                        "رسائل ${summary.chats.sumOf { it.messages }} و وسائط ${summary.chats.sumOf { it.media }} في ${summary.chats.size} محادثة")
                     if (summary.warnings.isNotEmpty()) notifyStaleOnce(engine, summary.warnings.first())
                     Result.success(workDataOf("ok" to summary.ok, "exported" to exported))
                 }
             }
+        } catch (e: StoppedByUser) {
+            engine.log.info("أوقف المستخدم التشغيل")
+            Result.success(workDataOf("ok" to false, "error" to e.message))
         } catch (e: Throwable) {
             // Throwable وليس Exception فقط: حتى أخطاء مثل OutOfMemoryError تظهر رسالة بدل انهيار التطبيق
             val msg = (e.message ?: "") .let { if (e is Exception && it.isNotEmpty()) it else "${e.javaClass.simpleName}: $it" }

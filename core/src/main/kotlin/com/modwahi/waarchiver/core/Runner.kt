@@ -353,6 +353,8 @@ fun runArchive(
     opener: SqlOpener, contacts: Map<String, String> = emptyMap(), dryRun: Boolean = false,
     scheduled: Boolean = false, dryDir: File? = null, now: Double = System.currentTimeMillis() / 1000.0,
     onProgress: ((String, Double?) -> Unit)? = null,
+    /** يُستدعى بقائمة كل المحادثات بعد الفك (ليتحدث عرض المحادثات بدون فك إضافي). */
+    onChats: ((List<ChatInfo>) -> Unit)? = null,
 ): Summary? {
     val state = State(paths.state)
     val startedAt = Naming.localDt(Math.floor(now).toLong(), cfg.zone)
@@ -393,6 +395,8 @@ fun runArchive(
         val archiver = Archiver(cfg, source, uploader, log, contacts, dryRun, now)
         try {
             withDecryptedDb(source, paths, key, log, opener, { onProgress?.invoke("فك النسخة الاحتياطية", it) }) { db ->
+                onProgress?.invoke("قراءة المحادثات", null)
+                onChats?.let { cb -> runCatching { cb(db.listChatsCached()) } }
                 cfg.chats.forEachIndexed { i, spec ->
                     onProgress?.invoke("المحادثة ${i + 1} من ${cfg.chats.size}", null)
                     val r = try {

@@ -93,6 +93,30 @@ class Prefs(context: Context) {
         get() = str("last_run")
         set(v) = put { putString("last_run", v) }
 
+    /** آخر 30 تشغيلاً (JSON array، الأحدث أولاً) */
+    var history: List<JSONObject>
+        get() = str("history")?.let { s -> val a = JSONArray(s); (0 until a.length()).map { a.getJSONObject(it) } } ?: emptyList()
+        set(v) = put { putString("history", JSONArray(v.take(30)).toString()) }
+
+    /** 0 حسب النظام، 1 فاتح، 2 داكن */
+    var themeMode: Int
+        get() = sp.getInt("theme", 0)
+        set(v) = put { putInt("theme", v) }
+
+    var notifySuccess: Boolean
+        get() = sp.getBoolean("notify_success", false)
+        set(v) = put { putBoolean("notify_success", v) }
+
+    /** استخدام أسماء جهات الاتصال في التلفون لأسماء المرسلين (مثل contacts.json في الأداة) */
+    var importContacts: Boolean
+        get() = sp.getBoolean("import_contacts", false)
+        set(v) = put { putBoolean("import_contacts", v) }
+
+    /** رمز الدولة لتحويل الأرقام المحلية (077…) في جهات الاتصال إلى دولية (96777…) */
+    var countryCode: String
+        get() = str("country_code") ?: "967"
+        set(v) = put { putString("country_code", v) }
+
     var staleNotifiedDay: String?
         get() = str("stale_notified")
         set(v) = put { putString("stale_notified", v) }
