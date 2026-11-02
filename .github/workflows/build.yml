@@ -1,0 +1,101 @@
+name: Build
+
+# عند كل push: اختبارات + APK للتجربة.
+# عند كل tag يبدأ بـ v (مثل v1.0.0): APK موقّع بمفتاح الإصدار، يُرفق في GitHub Release.
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Android SDK 37
+        run: yes | sdkmanager --licenses > /dev/null; sdkmanager "platforms;android-37.0" "build-tools;37.0.0" > /dev/null
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Release signing key
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          KEYSTORE_B64: ${{ secrets.SIGNING_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.SIGNING_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::أسرار التوقيع غير موجودة. أضف SIGNING_KEYSTORE_BASE64 و SIGNING_STORE_PASSWORD و SIGNING_KEY_ALIAS و SIGNING_KEY_PASSWORD في Settings → Secrets and variables → Actions ثم أعد التشغيل (Re-run)."
+            exit 1
+          fi
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          {
+            echo "SIGNING_STORE_FILE=$RUNNER_TEMP/release.jks"
+            echo "SIGNING_STORE_PASSWORD=$STORE_PASSWORD"
+            echo "SIGNING_KEY_ALIAS=$KEY_ALIAS"
+            echo "SIGNING_KEY_PASSWORD=$KEY_PASSWORD"
+          } >> "$GITHUB_ENV"
+
+      - name: Tests (core + Android adapter, parity with the Python tool)
+        run: ./gradlew :core:test :app:testDebugUnitTest --no-daemon
+
+      - name: Build APK
+        run: ./gradlew :app:assembleRelease --no-daemon
+
+      - name: SHA-1 of the signing certificate (for the Google OAuth client)
+        id: cert
+        run: |
+          APK=app/build/outputs/apk/release/app-release.apk
+          CERTS=$("$ANDROID_HOME/build-tools/37.0.0/apksigner" verify --print-certs "$APK")
+          echo "$CERTS"
+          SHA1=$(echo "$CERTS" | grep -m1 'SHA-1 digest' | awk '{print $NF}' | sed 's/../&:/g;s/:$//' | tr a-f A-F)
+          echo "sha1=$SHA1" >> "$GITHUB_OUTPUT"
+          echo "::notice title=SHA-1::$SHA1"
+          {
+            echo "### SHA-1 لمفتاح التوقيع"
+            echo '```'
+            echo "$SHA1"
+            echo '```'
+            echo "الـ package: \`com.modwahi.waarchiver\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          NAME="whatsapp-archiver-${GITHUB_REF_NAME//\//-}.apk"
+          cp "$APK" "$NAME"
+          echo "apk=$NAME" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: ${{ steps.cert.outputs.apk }}
+
+      - name: GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.cert.outputs.apk }}
+          body: |
+            ## التثبيت
+            افتح هذه الصفحة من التلفون، واضغط على ملف `${{ steps.cert.outputs.apk }}` لتنزيله، ثم افتحه واسمح بتثبيت التطبيقات من هذا المصدر.
+
+            - الـ package: `com.modwahi.waarchiver`
+            - SHA-1 لمفتاح التوقيع (يُستخدم في OAuth client على Google Cloud): `${{ steps.cert.outputs.sha1 }}`
+
+            خطوات الإعداد في [اقرأني.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/اقرأني.md).

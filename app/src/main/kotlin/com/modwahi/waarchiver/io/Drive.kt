@@ -1,0 +1,190 @@
+package com.modwahi.waarchiver.io
+
+import com.modwahi.waarchiver.core.UploadError
+import com.modwahi.waarchiver.core.Uploader
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.IOException
+import java.util.concurrent.TimeUnit
+
+/**
+ * Google Drive REST v3 بصلاحية drive.file فقط: التطبيق يرى ويكتب فقط الملفات التي أنشأها هو.
+ * العمليات المستخدمة: بحث، قراءة، إنشاء، وتحديث محتوى ملف موجود. لا يوجد أي طلب DELETE ولا نقل للمهملات.
+ *
+ * tokenProvider(forceRefresh) يرجع access token صالحاً (من Google Identity AuthorizationClient).
+ */
+class DriveClient(private val tokenProvider: (Boolean) -> String) {
+    companion object {
+        const val FOLDER_MIME = "application/vnd.google-apps.folder"
+        private const val API = "https://www.googleapis.com/drive/v3"
+        private const val UPLOAD = "https://www.googleapis.com/upload/drive/v3"
+        private val JSON = "application/json; charset=UTF-8".toMediaType()
+
+        fun q(s: String) = s.replace("\\", "\\\\").replace("'", "\\'")
+    }
+
+    private val http = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.MINUTES)
+        .writeTimeout(10, TimeUnit.MINUTES)
+        .build()
+
+    private var token: String? = null
+
+    /** ينفّذ الطلب مع إعادة المحاولة (5xx، 429، 403 rate limit، انقطاع الشبكة) وتجديد التوكن عند 401. */
+    private fun <T> call(build: (Request.Builder) -> Request.Builder, handle: (Response) -> T): T {
+        var attempt = 0
+        var refreshed = false
+        while (true) {
+            val t = token ?: tokenProvider(false).also { token = it }
+            val req = build(Request.Builder()).header("Authorization", "Bearer $t").build()
+            try {
+                http.newCall(req).execute().use { resp ->
+                    when {
+                        resp.isSuccessful -> return handle(resp)
+                        resp.code == 401 && !refreshed -> {
+                            refreshed = true
+                            token = tokenProvider(true)
+                        }
+                        (resp.code == 429 || resp.code >= 500 || (resp.code == 403 && resp.peekBody(4096).string()
+                            .contains("rateLimitExceeded", ignoreCase = true))) && attempt < 6 -> {
+                            Thread.sleep((1000L shl attempt).coerceAtMost(32_000))
+                            attempt++
+                        }
+                        else -> throw UploadError(describe(resp))
+                    }
+                }
+            } catch (e: IOException) {
+                if (attempt >= 6) throw UploadError("انقطع الاتصال بـ Google Drive: ${e.message}", e)
+                Thread.sleep((1000L shl attempt).coerceAtMost(32_000))
+                attempt++
+            }
+        }
+    }
+
+    private fun describe(resp: Response): String {
+        val body = runCatching { resp.body.string() }.getOrDefault("")
+        val msg = runCatching { JSONObject(body).getJSONObject("error").getString("message") }.getOrDefault(body.take(200))
+        return "Google Drive رفض الطلب (${resp.code}): $msg"
+    }
+
+    data class DFile(val id: String, val name: String, val mime: String, val size: Long, val trashed: Boolean)
+
+    private fun parse(o: JSONObject) = DFile(o.getString("id"), o.optString("name"), o.optString("mimeType"),
+        o.optString("size", "0").toLongOrNull() ?: 0, o.optBoolean("trashed"))
+
+    fun get(id: String): DFile? = try {
+        call({ it.url("$API/files/$id?fields=id,name,mimeType,size,trashed&supportsAllDrives=true") }) {
+            parse(JSONObject(it.body.string()))
+        }
+    } catch (e: UploadError) {
+        if (e.message?.contains("(404)") == true) null else throw e
+    }
+
+    fun find(parentId: String, name: String, folder: Boolean? = null): DFile? {
+        val cond = buildString {
+            append("'${q(parentId)}' in parents and name = '${q(name)}' and trashed = false")
+            if (folder == true) append(" and mimeType = '$FOLDER_MIME'")
+            if (folder == false) append(" and mimeType != '$FOLDER_MIME'")
+        }
+        val url = "$API/files".toHttpUrl().newBuilder()
+            .addQueryParameter("q", cond)
+            .addQueryParameter("fields", "files(id,name,mimeType,size,trashed)")
+            .addQueryParameter("pageSize", "10")
+            .addQueryParameter("spaces", "drive")
+            .build()
+        return call({ it.url(url) }) { r ->
+            val a: JSONArray = JSONObject(r.body.string()).optJSONArray("files") ?: JSONArray()
+            (0 until a.length()).map { parse(a.getJSONObject(it)) }.firstOrNull()
+        }
+    }
+
+    fun createFolder(name: String, parentId: String?): String {
+        val meta = JSONObject().put("name", name).put("mimeType", FOLDER_MIME)
+        if (parentId != null) meta.put("parents", JSONArray().put(parentId))
+        return call({ it.url("$API/files?fields=id").post(meta.toString().toRequestBody(JSON)) }) {
+            JSONObject(it.body.string()).getString("id")
+        }
+    }
+
+    fun download(id: String): ByteArray = call({ it.url("$API/files/$id?alt=media") }) { it.body.bytes() }
+
+    /** إنشاء ملف جديد (رفع resumable يتحمل الملفات الكبيرة). */
+    fun create(parentId: String, name: String, file: File, mime: String): String {
+        val meta = JSONObject().put("name", name).put("parents", JSONArray().put(parentId))
+        val session = call({
+            it.url("$UPLOAD/files?uploadType=resumable&fields=id")
+                .header("X-Upload-Content-Type", mime)
+                .header("X-Upload-Content-Length", file.length().toString())
+                .post(meta.toString().toRequestBody(JSON))
+        }) { it.header("Location") ?: throw UploadError("Google Drive لم يرجع رابط الرفع") }
+        return call({ it.url(session).put(file.asRequestBody(mime.toMediaType())) }) {
+            JSONObject(it.body.string()).getString("id")
+        }
+    }
+
+    /** تحديث محتوى ملف موجود (الرسائل.json/txt والملخص) — بدون حذف. */
+    fun update(id: String, file: File, mime: String) {
+        val body: RequestBody = file.asRequestBody(mime.toMediaType())
+        call({ it.url("$UPLOAD/files/$id?uploadType=media&fields=id").patch(body) }) { }
+    }
+}
+
+/**
+ * Uploader فوق Drive: كل المسارات نسبية لمجلد التطبيق (folder ID محفوظ).
+ * المجلد يمكن نقله يدوياً لأي مكان في الدرايف: نستخدم الـ ID لا المسار.
+ */
+class DriveUploader(private val drive: DriveClient, private val rootId: String) : Uploader {
+    private val dirCache = HashMap<String, String>()
+
+    private fun dirId(relDir: String, create: Boolean): String? {
+        var cur = rootId
+        var path = ""
+        for (part in relDir.split('/').filter { it.isNotEmpty() }) {
+            path = if (path.isEmpty()) part else "$path/$part"
+            cur = dirCache[path] ?: run {
+                val found = drive.find(cur, part, folder = true)?.id
+                    ?: if (create) drive.createFolder(part, cur) else return null
+                found.also { dirCache[path] = it }
+            }
+        }
+        return cur
+    }
+
+    override fun readFile(relDir: String, name: String): ByteArray? {
+        val dir = dirId(relDir, create = false) ?: return null
+        val f = drive.find(dir, name, folder = false) ?: return null
+        return drive.download(f.id)
+    }
+
+    override fun uploadDir(localDir: File, relDir: String) {
+        localDir.walkTopDown().filter { it.isFile }.sortedBy { it.path }.forEach { src ->
+            val relParent = src.parentFile!!.relativeTo(localDir).path
+            val dir = dirId(listOf(relDir, relParent).filter { it.isNotEmpty() }.joinToString("/"), create = true)!!
+            val mime = mimeOf(src.name)
+            val existing = drive.find(dir, src.name, folder = false)
+            when {
+                existing == null -> drive.create(dir, src.name, src, mime)
+                // الرسائل والملخص تتغير: نحدّث المحتوى. الوسائط بنفس الاسم والحجم: موجودة، لا داعي لرفعها
+                src.name.endsWith(".json") || src.name.endsWith(".txt") || existing.size != src.length() ->
+                    drive.update(existing.id, src, mime)
+            }
+        }
+    }
+
+    private fun mimeOf(name: String): String = when (name.substringAfterLast('.', "").lowercase()) {
+        "json" -> "application/json"
+        "txt" -> "text/plain"
+        else -> android.webkit.MimeTypeMap.getSingleton()
+            .getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+    }
+}
