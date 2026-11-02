@@ -1,10 +1,5 @@
 package com.modwahi.waarchiver.core
 
-import org.bouncycastle.crypto.InvalidCipherTextException
-import org.bouncycastle.crypto.engines.AESEngine
-import org.bouncycastle.crypto.modes.GCMBlockCipher
-import org.bouncycastle.crypto.params.AEADParameters
-import org.bouncycastle.crypto.params.KeyParameter
 import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileOutputStream
@@ -26,8 +21,8 @@ class DecryptError(message: String) : Exception(message)
  *   [بيانات AES-GCM لنص مضغوط zlib] [16 بايت وسم المصادقة] [16 بايت md5 لكل ما سبق]
  * النسخ متعددة الأجزاء ليس فيها md5 في النهاية.
  *
- * نفك AES-GCM بـ Bouncy Castle لأنه يُخرج النص على دفعات (لا يحتفظ إلا بآخر 16 بايت)،
- * بينما GCM في Java/Android يحتفظ بالملف كله في الذاكرة حتى النهاية.
+ * نفك AES-GCM بـ StreamingGcm لأنه يُخرج النص على دفعات، بينما GCM في Java/Android
+ * يحتفظ بالملف كله في الذاكرة حتى النهاية.
  */
 object Crypt15 {
     const val CHUNK = 1024 * 1024
@@ -52,7 +47,7 @@ object Crypt15 {
         return mac.doFinal().copyOf(32)
     }
 
-    private class Header(val cipher: org.bouncycastle.crypto.modes.GCMModeCipher, val md5: MessageDigest, val length: Int)
+    private class Header(val cipher: StreamingGcm, val md5: MessageDigest, val length: Int)
 
     private fun readFully(input: InputStream, n: Int): ByteArray {
         val buf = ByteArray(n)
@@ -99,9 +94,7 @@ object Crypt15 {
         } catch (e: Exception) {
             throw DecryptError("تعذّر قراءة رأس ملف النسخة الاحتياطية: ${e.javaClass.simpleName}")
         }
-        val cipher = GCMBlockCipher.newInstance(AESEngine.newInstance())
-        cipher.init(false, AEADParameters(KeyParameter(key), 128, iv))
-        return Header(cipher, md5, length)
+        return Header(StreamingGcm(key, iv), md5, length)
     }
 
     private class Prefix(val c15Iv: ByteArray?, val hasC14: Boolean)
@@ -174,8 +167,8 @@ object Crypt15 {
         val inp = BufferedInputStream(input, 64 * 1024)
         val h = openHeader(inp, keyHex)
         val chunk = readFully(inp, probeBytes)
-        val plain = ByteArray(h.cipher.getUpdateOutputSize(chunk.size))
-        val n = h.cipher.processBytes(chunk, 0, chunk.size, plain, 0)
+        val plain = ByteArray(h.cipher.outputSize(chunk.size))
+        val n = h.cipher.update(chunk, 0, chunk.size, plain, 0)
         val inf = Inflater()
         val out = ByteArray(SQLITE_MAGIC.size)
         var got = 0
@@ -262,7 +255,7 @@ object Crypt15 {
                         if (n <= 0) throw DecryptError("ملف النسخة الاحتياطية مقطوع (انتهى قبل المتوقع)")
                         remaining -= n
                         h.md5.update(buf, 0, n)
-                        val p = cipher.processBytes(buf, 0, n, plain, 0)
+                        val p = cipher.update(buf, 0, n, plain, 0)
                         inflateAll(plain, p, first)
                         first = false
                         onProgress?.invoke(1.0 - remaining.toDouble() / total)
@@ -273,12 +266,8 @@ object Crypt15 {
                     val checksum = trailer.copyOfRange(16, 32)
                     // إن طابق md5: أول 16 هي وسم المصادقة. وإلا (multi-file): آخر 16 هي الوسم.
                     val feed = if (h.md5.digest().contentEquals(checksum)) 16 else 32
-                    var p = cipher.processBytes(trailer, 0, feed, plain, 0)
-                    try {
-                        p += cipher.doFinal(plain, p)
-                    } catch (e: InvalidCipherTextException) {
-                        throw DecryptError("فشل التحقق من سلامة النسخة (الملف تالف أو المفتاح خاطئ)")
-                    }
+                    var p = if (feed == 32) cipher.update(trailer, 0, 16, plain, 0) else 0
+                    p += cipher.finish(trailer.copyOfRange(feed - 16, feed), plain, p)
                     inflateAll(plain, p, first)
                     if (!inf.finished()) throw DecryptError("النسخة الاحتياطية مقطوعة (ضغط zlib غير مكتمل)")
                 }

@@ -12,7 +12,6 @@ kotlin {
 }
 
 dependencies {
-    implementation(libs.bouncycastle)
     testImplementation(libs.junit)
     testImplementation(libs.sqlite.jdbc)
 }

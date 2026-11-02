@@ -47,6 +47,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var job by mutableStateOf<Job?>(null); private set
     var listError by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
+    /** نص آخر انهيار (إن وُجد) لعرضه ونسخه */
+    var crash by mutableStateOf<String?>(com.modwahi.waarchiver.App.crashFile(app).takeIf { it.exists() }?.readText())
+
+    fun dismissCrash() {
+        com.modwahi.waarchiver.App.crashFile(getApplication()).delete()
+        crash = null
+    }
 
     // الإعدادات
     var firstRunDays by mutableStateOf(prefs.firstRunDays); private set

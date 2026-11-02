@@ -81,6 +81,21 @@ fun Root(vm: AppViewModel, a: Actions) {
             TextButton(onClick = { vm.message = null }) { Text("حسناً") }
         }, text = { Text(msg) })
     }
+    vm.crash?.let { text ->
+        val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+        AlertDialog(onDismissRequest = { }, title = { Text("توقف التطبيق في المرة السابقة") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    Text("اضغط «نسخ» وأرسل النص للمطوّر (لا يحتوي المفتاح).")
+                    Spacer(Modifier.height(8.dp))
+                    Text(text, style = MaterialTheme.typography.bodySmall)
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { clip.setText(androidx.compose.ui.text.AnnotatedString(text)); vm.message = "تم النسخ ✓" }) { Text("نسخ") }
+            },
+            dismissButton = { TextButton(onClick = { vm.dismissCrash() }) { Text("إغلاق") } })
+    }
     if (!vm.setupDone) SetupWizard(vm, a) else MainTabs(vm, a)
 }
 

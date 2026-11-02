@@ -87,7 +87,7 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         if (pct != null && p == lastPct) return
         lastPct = p
         setProgress(workDataOf("stage" to stage, "pct" to p))
-        runCatching { setForeground(foreground(stage, pct)) }
+        try { setForeground(foreground(stage, pct)) } catch (_: Throwable) {}
     }
 
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
@@ -97,7 +97,7 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         try {
             // إشعار foreground أثناء التشغيل. قد يرفضه أندرويد 12+ إن كان التطبيق في الخلفية ولم يُستثنَ من
             // تحسين البطارية — نكمل بدونه.
-            try { setForeground(foreground("بدء التشغيل…", null)) } catch (e: Exception) {
+            try { setForeground(foreground("بدء التشغيل…", null)) } catch (e: Throwable) {
                 engine.log.warning("تعذّر إظهار إشعار التشغيل: ${e.javaClass.simpleName}")
             }
             val report: (String, Double?) -> Unit = { s, p -> kotlinx.coroutines.runBlocking { progress(s, p) } }
@@ -119,9 +119,10 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     Result.success(workDataOf("ok" to summary.ok, "exported" to exported))
                 }
             }
-        } catch (e: Exception) {
-            val msg = e.message ?: e.javaClass.simpleName
-            engine.log.error(msg)
+        } catch (e: Throwable) {
+            // Throwable وليس Exception فقط: حتى أخطاء مثل OutOfMemoryError تظهر رسالة بدل انهيار التطبيق
+            val msg = (e.message ?: "") .let { if (e is Exception && it.isNotEmpty()) it else "${e.javaClass.simpleName}: $it" }
+            engine.log.error(msg + "\n" + com.modwahi.waarchiver.App.describe(e))
             if (action == "list") return@withContext Result.failure(workDataOf("error" to msg))
             Notifier.failure(applicationContext, msg)
             Result.success(workDataOf("ok" to false, "error" to msg))
