@@ -1,0 +1,21 @@
+[
+  {
+    "id": "3EB000000000000F",
+    "row_id": 15,
+    "timestamp": 1793595600,
+    "time": "2026-11-02T08:00:00",
+    "chat_jid": "967773333333@s.whatsapp.net",
+    "sender": "967773333333",
+    "sender_jid": "967773333333@s.whatsapp.net",
+    "from_me": false,
+    "type": "text",
+    "text": "رسالة \"مقتبسة\" وفيها \\ وتاب\tهنا 😀",
+    "has_media": false,
+    "media_file": null,
+    "media_status": null,
+    "mime": null,
+    "quoted_id": null,
+    "quoted_text": null,
+    "forwarded": false
+  }
+]

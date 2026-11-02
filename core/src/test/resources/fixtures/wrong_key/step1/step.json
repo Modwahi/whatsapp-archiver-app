@@ -1,0 +1,39 @@
+{
+  "note": "مفتاح خاطئ",
+  "state_before_exists": false,
+  "now": 1793581200.0,
+  "backup_mtime": 1793574000.0,
+  "dry_run": false,
+  "scheduled": false,
+  "key": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "fail_upload": null,
+  "config": {
+    "chats": [
+      {
+        "jid": "120363111111111111@g.us",
+        "name": ""
+      },
+      {
+        "jid": "967773333333@s.whatsapp.net",
+        "name": "العميل سعيد"
+      }
+    ],
+    "first_run_days": 7,
+    "max_media_mb": 1,
+    "stale_backup_hours": 36,
+    "me_name": "أنا",
+    "timezone": "Asia/Aden",
+    "contacts": {
+      "967771111111": "أحمد"
+    }
+  },
+  "result": {
+    "ok": false,
+    "errors": [
+      "المفتاح لا يطابق ملف النسخة الاحتياطية"
+    ],
+    "warnings": [],
+    "chats": []
+  },
+  "state": null
+}

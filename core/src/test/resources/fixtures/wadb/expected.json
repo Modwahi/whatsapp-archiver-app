@@ -1,0 +1,267 @@
+{
+  "chats": [
+    {
+      "row_id": 3,
+      "jid": "967773333333@s.whatsapp.net",
+      "subject": "",
+      "is_group": false,
+      "message_count": 2,
+      "last_timestamp": 1793513100
+    },
+    {
+      "row_id": 2,
+      "jid": "120363999999999999@g.us",
+      "subject": "العائلة",
+      "is_group": true,
+      "message_count": 1,
+      "last_timestamp": 1793440800
+    },
+    {
+      "row_id": 1,
+      "jid": "120363111111111111@g.us",
+      "subject": "طلبات التحويل: الشركة",
+      "is_group": true,
+      "message_count": 9,
+      "last_timestamp": 1793439060
+    }
+  ],
+  "messages": {
+    "967773333333@s.whatsapp.net": [
+      {
+        "row_id": 11,
+        "key_id": "3EB000000000000B",
+        "chat_jid": "967773333333@s.whatsapp.net",
+        "timestamp": 1793512800,
+        "from_me": false,
+        "sender_jid": "967773333333@s.whatsapp.net",
+        "type": "text",
+        "text": "السلام عليكم، أرسلت المبلغ",
+        "media_path": null,
+        "mime": null,
+        "media_name": null,
+        "media_size": null,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": false
+        }
+      },
+      {
+        "row_id": 12,
+        "key_id": "3EB000000000000C",
+        "chat_jid": "967773333333@s.whatsapp.net",
+        "timestamp": 1793513100,
+        "from_me": true,
+        "sender_jid": "",
+        "type": "text",
+        "text": "وصل",
+        "media_path": null,
+        "mime": null,
+        "media_name": null,
+        "media_size": null,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": false
+        }
+      }
+    ],
+    "120363999999999999@g.us": [
+      {
+        "row_id": 10,
+        "key_id": "3EB000000000000A",
+        "chat_jid": "120363999999999999@g.us",
+        "timestamp": 1793440800,
+        "from_me": false,
+        "sender_jid": "967775555555@s.whatsapp.net",
+        "type": "image",
+        "text": "صورة العائلة",
+        "media_path": "Media/WhatsApp Images/IMG-FAMILY.jpg",
+        "mime": "image/jpeg",
+        "media_name": null,
+        "media_size": 10,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": true
+        }
+      }
+    ],
+    "120363111111111111@g.us": [
+      {
+        "row_id": 1,
+        "key_id": "3EB0000000000001",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1792472400,
+        "from_me": false,
+        "sender_jid": "967771111111@s.whatsapp.net",
+        "type": "text",
+        "text": "رسالة أقدم من ٧ أيام",
+        "media_path": null,
+        "mime": null,
+        "media_name": null,
+        "media_size": null,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": false
+        }
+      },
+      {
+        "row_id": 3,
+        "key_id": "3EB0000000000003",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1793393970,
+        "from_me": false,
+        "sender_jid": "967771111111@s.whatsapp.net",
+        "type": "text",
+        "text": "حوّلوا 500,000 ريال لحساب الكريمي\nرقم 123",
+        "media_path": null,
+        "mime": null,
+        "media_name": null,
+        "media_size": null,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": false
+        }
+      },
+      {
+        "row_id": 4,
+        "key_id": "3EB0000000000004",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1793394010,
+        "from_me": false,
+        "sender_jid": "967772222222@s.whatsapp.net",
+        "type": "text",
+        "text": "تم التحويل ✅",
+        "media_path": null,
+        "mime": null,
+        "media_name": null,
+        "media_size": null,
+        "quoted_text": "حوّلوا 500,000 ريال لحساب الكريمي رقم 123 — مع الإشعار من فضلكم",
+        "quoted_id": "3EB0000000000003",
+        "forwarded": false,
+        "push_name": "سالم المحاسب",
+        "extra": {
+          "has_media": false
+        }
+      },
+      {
+        "row_id": 5,
+        "key_id": "3EB0000000000005",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1793430900,
+        "from_me": false,
+        "sender_jid": "967772222222@s.whatsapp.net",
+        "type": "image",
+        "text": "إشعار التحويل",
+        "media_path": "Media/WhatsApp Images/IMG-20261031-WA0001.jpg",
+        "mime": "image/jpeg",
+        "media_name": null,
+        "media_size": 10,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": "سالم المحاسب",
+        "extra": {
+          "has_media": true
+        }
+      },
+      {
+        "row_id": 6,
+        "key_id": "3EB0000000000006",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1793433600,
+        "from_me": false,
+        "sender_jid": "967771111111@s.whatsapp.net",
+        "type": "image",
+        "text": "",
+        "media_path": "Media/WhatsApp Images/IMG-20261031-WA0002.jpg",
+        "mime": "image/jpeg",
+        "media_name": null,
+        "media_size": 10,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": true
+        }
+      },
+      {
+        "row_id": 7,
+        "key_id": "3EB0000000000007",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1793437200,
+        "from_me": false,
+        "sender_jid": "967771111111@s.whatsapp.net",
+        "type": "document",
+        "text": "",
+        "media_path": "Media/WhatsApp Documents/كشف: حساب.pdf",
+        "mime": "application/pdf",
+        "media_name": "كشف: حساب.pdf",
+        "media_size": 10,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": true,
+        "push_name": null,
+        "extra": {
+          "has_media": true
+        }
+      },
+      {
+        "row_id": 8,
+        "key_id": "3EB0000000000008",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1793439000,
+        "from_me": true,
+        "sender_jid": "",
+        "type": "text",
+        "text": "وصل، شكراً",
+        "media_path": null,
+        "mime": null,
+        "media_name": null,
+        "media_size": null,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": false
+        }
+      },
+      {
+        "row_id": 9,
+        "key_id": "3EB0000000000009",
+        "chat_jid": "120363111111111111@g.us",
+        "timestamp": 1793439060,
+        "from_me": false,
+        "sender_jid": "967771111111@s.whatsapp.net",
+        "type": "deleted",
+        "text": "[رسالة محذوفة]",
+        "media_path": null,
+        "mime": null,
+        "media_name": null,
+        "media_size": null,
+        "quoted_text": null,
+        "quoted_id": null,
+        "forwarded": false,
+        "push_name": null,
+        "extra": {
+          "has_media": false
+        }
+      }
+    ]
+  }
+}

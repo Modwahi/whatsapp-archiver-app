@@ -1,0 +1,40 @@
+[
+  {
+    "id": "3EB000000000000B",
+    "row_id": 11,
+    "timestamp": 1793512800,
+    "time": "2026-11-01T09:00:00",
+    "chat_jid": "967773333333@s.whatsapp.net",
+    "sender": "967773333333",
+    "sender_jid": "967773333333@s.whatsapp.net",
+    "from_me": false,
+    "type": "text",
+    "text": "السلام عليكم، أرسلت المبلغ",
+    "has_media": false,
+    "media_file": null,
+    "media_status": null,
+    "mime": null,
+    "quoted_id": null,
+    "quoted_text": null,
+    "forwarded": false
+  },
+  {
+    "id": "3EB000000000000C",
+    "row_id": 12,
+    "timestamp": 1793513100,
+    "time": "2026-11-01T09:05:00",
+    "chat_jid": "967773333333@s.whatsapp.net",
+    "sender": "أنا",
+    "sender_jid": "",
+    "from_me": true,
+    "type": "text",
+    "text": "وصل",
+    "has_media": false,
+    "media_file": null,
+    "media_status": null,
+    "mime": null,
+    "quoted_id": null,
+    "quoted_text": null,
+    "forwarded": false
+  }
+]

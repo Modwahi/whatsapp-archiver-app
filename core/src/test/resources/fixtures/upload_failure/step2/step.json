@@ -1,0 +1,80 @@
+{
+  "note": "إعادة التشغيل",
+  "state_before_exists": true,
+  "now": 1793581200.0,
+  "backup_mtime": 1793574000.0,
+  "dry_run": false,
+  "scheduled": false,
+  "key": "a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1",
+  "fail_upload": null,
+  "config": {
+    "chats": [
+      {
+        "jid": "120363111111111111@g.us",
+        "name": ""
+      },
+      {
+        "jid": "967773333333@s.whatsapp.net",
+        "name": "العميل سعيد"
+      }
+    ],
+    "first_run_days": 7,
+    "max_media_mb": 1,
+    "stale_backup_hours": 36,
+    "me_name": "أنا",
+    "timezone": "Asia/Aden",
+    "contacts": {
+      "967771111111": "أحمد"
+    }
+  },
+  "result": {
+    "ok": true,
+    "errors": [],
+    "warnings": [],
+    "chats": [
+      {
+        "jid": "120363111111111111@g.us",
+        "name": "طلبات التحويل_ الشركة",
+        "messages": 7,
+        "media": 2,
+        "media_missing": 1,
+        "media_too_large": 0,
+        "recovered": 0,
+        "error": null
+      },
+      {
+        "jid": "967773333333@s.whatsapp.net",
+        "name": "العميل سعيد",
+        "messages": 0,
+        "media": 0,
+        "media_missing": 0,
+        "media_too_large": 0,
+        "recovered": 0,
+        "error": null
+      }
+    ]
+  },
+  "state": {
+    "chats": {
+      "120363111111111111@g.us": {
+        "last_row_id": 9,
+        "last_timestamp": 1793439060,
+        "pending_media": [
+          {
+            "id": "3EB0000000000006",
+            "date": "2026-10-31",
+            "attempts": 0
+          }
+        ],
+        "folder": "طلبات التحويل_ الشركة"
+      },
+      "967773333333@s.whatsapp.net": {
+        "last_row_id": 12,
+        "last_timestamp": 1793513100,
+        "pending_media": [],
+        "folder": "العميل سعيد"
+      }
+    },
+    "last_backup_mtime": 1793574000.0
+  }
+}

@@ -1,0 +1,72 @@
+{
+  "note": "فشل رفع المجموعة",
+  "state_before_exists": false,
+  "now": 1793581200.0,
+  "backup_mtime": 1793574000.0,
+  "dry_run": false,
+  "scheduled": false,
+  "key": "a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1a3f1",
+  "fail_upload": "طلبات التحويل_ الشركة",
+  "config": {
+    "chats": [
+      {
+        "jid": "120363111111111111@g.us",
+        "name": ""
+      },
+      {
+        "jid": "967773333333@s.whatsapp.net",
+        "name": "العميل سعيد"
+      }
+    ],
+    "first_run_days": 7,
+    "max_media_mb": 1,
+    "stale_backup_hours": 36,
+    "me_name": "أنا",
+    "timezone": "Asia/Aden",
+    "contacts": {
+      "967771111111": "أحمد"
+    }
+  },
+  "result": {
+    "ok": false,
+    "errors": [],
+    "warnings": [],
+    "chats": [
+      {
+        "jid": "120363111111111111@g.us",
+        "name": "120363111111111111@g.us",
+        "messages": 0,
+        "media": 0,
+        "media_missing": 0,
+        "media_too_large": 0,
+        "recovered": 0,
+        "error": "انقطع الاتصال"
+      },
+      {
+        "jid": "967773333333@s.whatsapp.net",
+        "name": "العميل سعيد",
+        "messages": 2,
+        "media": 0,
+        "media_missing": 0,
+        "media_too_large": 0,
+        "recovered": 0,
+        "error": null
+      }
+    ]
+  },
+  "state": {
+    "chats": {
+      "120363111111111111@g.us": {
+        "last_row_id": 0,
+        "last_timestamp": 0,
+        "pending_media": []
+      },
+      "967773333333@s.whatsapp.net": {
+        "last_row_id": 12,
+        "last_timestamp": 1793513100,
+        "pending_media": [],
+        "folder": "العميل سعيد"
+      }
+    }
+  }
+}

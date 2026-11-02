@@ -1,0 +1,21 @@
+[
+  {
+    "id": "3EB0000000000003",
+    "row_id": 3,
+    "timestamp": 1793393970,
+    "time": "2026-10-30T23:59:30",
+    "chat_jid": "120363111111111111@g.us",
+    "sender": "أحمد (967771111111)",
+    "sender_jid": "967771111111@s.whatsapp.net",
+    "from_me": false,
+    "type": "text",
+    "text": "حوّلوا 500,000 ريال لحساب الكريمي\nرقم 123",
+    "has_media": false,
+    "media_file": null,
+    "media_status": null,
+    "mime": null,
+    "quoted_id": null,
+    "quoted_text": null,
+    "forwarded": false
+  }
+]
