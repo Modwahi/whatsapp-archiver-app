@@ -49,6 +49,21 @@ class WaDbTest {
         }
     }
 
+    /** محادثة خاصة بمعرّف @lid: نعرض رقمها الحقيقي من jid_map واسمها من lid_display_name */
+    @Test fun lidChatResolvedForDisplay() {
+        val f = decrypted()
+        DriverManager.getConnection("jdbc:sqlite:" + f.path).use { c ->
+            c.createStatement().execute("INSERT INTO chat (jid_row_id, hidden) SELECT _id, 0 FROM jid WHERE raw_string = '88888888888888@lid'")
+        }
+        WaDb(f, JdbcOpener).use { db ->
+            val chat = db.listChats().first { it.jid == "88888888888888@lid" }
+            assertEquals("967772222222", chat.phone)
+            assertEquals("سالم المحاسب", chat.pushName)
+            assertEquals("967773333333", db.listChats().first { it.jid == "967773333333@s.whatsapp.net" }.phone)
+            assertEquals("", db.listChats().first { it.isGroup }.phone)
+        }
+    }
+
     @Test fun optionalTablesMissing() {
         val f = decrypted()
         DriverManager.getConnection("jdbc:sqlite:" + f.path).use { c ->

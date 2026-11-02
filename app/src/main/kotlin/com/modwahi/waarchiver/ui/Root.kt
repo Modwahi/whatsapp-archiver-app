@@ -29,6 +29,7 @@ import androidx.compose.material.icons.rounded.Home
 import androidx.compose.material.icons.rounded.Inventory2
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.MenuBook
 import androidx.compose.material.icons.rounded.Notifications
 import androidx.compose.material.icons.rounded.PhoneAndroid
 import androidx.compose.material.icons.rounded.Settings
@@ -76,7 +77,7 @@ import com.modwahi.waarchiver.data.DRIVE_FOLDER_NAME
 import com.modwahi.waarchiver.data.Mode
 import kotlinx.coroutines.launch
 
-enum class Route { HOME, CHATS, SETTINGS, HISTORY, NAMES }
+enum class Route { HOME, CHATS, READ, SETTINGS, HISTORY, NAMES, READ_CHAT }
 
 @Suppress("DEPRECATION")
 @Composable
@@ -112,20 +113,24 @@ fun Root(vm: AppViewModel, a: Actions) {
 @Composable
 fun MainScaffold(vm: AppViewModel, a: Actions) {
     var route by rememberSaveable { mutableStateOf(Route.HOME) }
-    val tabs = listOf(Route.HOME to "الرئيسية", Route.CHATS to "المحادثات", Route.SETTINGS to "الإعدادات")
-    val sub = route == Route.HISTORY || route == Route.NAMES
-    BackHandler(enabled = route != Route.HOME) { route = if (route == Route.NAMES) Route.SETTINGS else Route.HOME }
+    var readerFolder by rememberSaveable { mutableStateOf("") }
+    val tabs = listOf(Route.HOME to "الرئيسية", Route.CHATS to "المحادثات", Route.READ to "الرسائل", Route.SETTINGS to "الإعدادات")
+    val sub = route == Route.HISTORY || route == Route.NAMES || route == Route.READ_CHAT
+    val back = { route = when (route) { Route.NAMES -> Route.SETTINGS; Route.READ_CHAT -> Route.READ; else -> Route.HOME } }
+    BackHandler(enabled = route != Route.HOME) { back() }
     val title = when (route) {
         Route.HOME -> "أرشيف واتساب"; Route.CHATS -> "المحادثات"; Route.SETTINGS -> "الإعدادات"
         Route.HISTORY -> "سجل التشغيلات"; Route.NAMES -> "أسماء الأرقام"
+        Route.READ -> "الرسائل المؤرشفة"; Route.READ_CHAT -> readerFolder
     }
     Scaffold(
         containerColor = MaterialTheme.colorScheme.background,
         topBar = {
             TopAppBar(
-                title = { Text(title, style = MaterialTheme.typography.titleLarge) },
+                title = { Text(title, style = MaterialTheme.typography.titleLarge, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis) },
                 navigationIcon = {
-                    if (sub) IconButton(onClick = { route = if (route == Route.NAMES) Route.SETTINGS else Route.HOME }) {
+                    if (sub) IconButton(onClick = { back() }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "رجوع")
                     }
                 },
@@ -134,7 +139,7 @@ fun MainScaffold(vm: AppViewModel, a: Actions) {
         },
         bottomBar = {
             if (!sub) NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                listOf(Icons.Rounded.Home, Icons.Rounded.Forum, Icons.Rounded.Settings).forEachIndexed { i, icon ->
+                listOf(Icons.Rounded.Home, Icons.Rounded.Forum, Icons.Rounded.MenuBook, Icons.Rounded.Settings).forEachIndexed { i, icon ->
                     NavigationBarItem(selected = route == tabs[i].first, onClick = { route = tabs[i].first },
                         icon = { Icon(icon, null) }, label = { Text(tabs[i].second) })
                 }
@@ -145,10 +150,12 @@ fun MainScaffold(vm: AppViewModel, a: Actions) {
             AnimatedContent(route, transitionSpec = { fadeIn() togetherWith fadeOut() }, label = "route") { r ->
                 when (r) {
                     Route.HOME -> HomeScreen(vm, a, openHistory = { route = Route.HISTORY }, openChats = { route = Route.CHATS })
-                    Route.CHATS -> ChatsScreen(vm)
+                    Route.CHATS -> ChatsScreen(vm, a)
                     Route.SETTINGS -> SettingsScreen(vm, a, openNames = { route = Route.NAMES }, openHistory = { route = Route.HISTORY })
                     Route.HISTORY -> HistoryScreen(vm)
                     Route.NAMES -> NamesScreen(vm, a)
+                    Route.READ -> ReaderListScreen(vm) { readerFolder = it; route = Route.READ_CHAT }
+                    Route.READ_CHAT -> ChatReaderScreen(vm, readerFolder)
                 }
             }
         }
@@ -213,7 +220,7 @@ fun SetupWizard(vm: AppViewModel, a: Actions) {
             if (step == 4) {
                 Column(Modifier.weight(1f).padding(horizontal = 16.dp)) {
                     body()
-                    ChatsScreen(vm, embedded = true)
+                    ChatsScreen(vm, a, embedded = true)
                 }
             } else {
                 Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp),

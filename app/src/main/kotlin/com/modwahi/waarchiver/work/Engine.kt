@@ -52,6 +52,7 @@ class Engine(private val context: Context) {
     val vault = KeyVault(context)
     val paths = Paths(home = File(context.filesDir, "archiver"), tmp = File(context.cacheDir, "work"))
     val log: ArchLog = FileLog(paths.logs)
+    val mirror = Mirror(File(context.filesDir, "mirror"))
 
     fun source(): SafSource {
         val uri = prefs.waTreeUri ?: throw RunError("لم تختر مجلد واتساب بعد. افتح التطبيق وأكمل الإعداد.")
@@ -128,7 +129,7 @@ class Engine(private val context: Context) {
     }.getOrDefault(emptyMap())
 
     private fun saveKnown(chats: List<ChatInfo>) {
-        prefs.knownChats = chats.map { KnownChat(it.jid, it.subject, it.isGroup, it.messageCount, it.lastTimestamp) }
+        prefs.knownChats = chats.map { KnownChat(it.jid, it.subject, it.isGroup, it.messageCount, it.lastTimestamp, it.phone, it.pushName) }
         prefs.knownChatsAt = System.currentTimeMillis()
     }
 
@@ -146,8 +147,11 @@ class Engine(private val context: Context) {
         // اسم المجلد ثابت: إن لم تكتب اسماً نستخدم الاسم الذي استُخدم أول مرة، حتى لا يتغير المجلد
         // لاحقاً إن أضفت اسم صاحب الرقم أو تغيّر اسم المجموعة
         val used = chatProgress()
+        val names = contacts()
+        val known = prefs.knownChats.associateBy { it.jid }
         val cfg = base.copy(chats = base.chats.map { c ->
-            if (c.name.isNotEmpty()) c else ChatSpec(c.jid, used[c.jid]?.folder.orEmpty())
+            if (c.name.isNotEmpty()) c
+            else ChatSpec(c.jid, used[c.jid]?.folder?.takeIf { it.isNotEmpty() } ?: lidFolderName(known[c.jid], names))
         })
         val stamp = SimpleDateFormat("yyyy-MM-dd_HHmmss", Locale.ROOT).format(Date())
         val dryDir = File(context.cacheDir, "dry/$stamp")
@@ -157,13 +161,14 @@ class Engine(private val context: Context) {
                 override fun readFile(relDir: String, name: String): ByteArray? = null
                 override fun uploadDir(localDir: File, relDir: String) {}
             }
-        } else uploader(progress)
+        } else MirroringUploader(uploader(progress), mirror)
         val summary = try {
             runArchive(cfg, paths, key(), source(), up, log, AndroidSql, contacts(),
                 dryRun = dryRun, scheduled = scheduled, dryDir = if (dryRun) dryDir else null,
                 onProgress = progress, onChats = ::saveKnown)
         } finally {
             (up as? LazyUploader)?.closeIfOpen()
+            ((up as? MirroringUploader)?.inner as? LazyUploader)?.closeIfOpen()
         }
         var exported: String? = null
         if (dryRun && summary != null) {
@@ -173,6 +178,42 @@ class Engine(private val context: Context) {
         }
         if (summary != null) saveRun(summary, exported, scheduled)
         return summary to exported
+    }
+
+    /**
+     * محادثة خاصة بمعرّف @lid: الأداة كانت ستسمي مجلدها بالمعرّف (145479585235031@lid).
+     * نعطيها اسماً مفهوماً: اسم جهة الاتصال، أو الاسم الذي وضعه الشخص لنفسه، أو الرقم الحقيقي.
+     */
+    private fun lidFolderName(k: KnownChat?, names: Map<String, String>): String {
+        if (k == null || !k.jid.endsWith("@lid")) return ""
+        return names[k.phone]?.takeIf { it.isNotBlank() } ?: k.pushName.ifEmpty { k.phone }
+    }
+
+    /** ينزّل ملفات الرسائل.json من الوجهة إلى نسخة القراءة (لما أُرشف قبل تفعيل القارئ). */
+    fun syncMirror(progress: (String, Double?) -> Unit): Int {
+        val (list, read) = when (prefs.mode) {
+            Mode.LOCAL -> {
+                val u = SafUploader(context, Uri.parse(prefs.localTreeUri ?: throw RunError("لم تختر مجلد الحفظ المحلي.")))
+                Pair({ rel: String -> u.list(rel) }, { rel: String, n: String -> u.readFile(rel, n) })
+            }
+            Mode.DRIVE -> {
+                val d = driveClient()
+                val u = DriveUploader(d, ensureDriveFolder(d))
+                Pair({ rel: String -> u.list(rel) }, { rel: String, n: String -> u.readFile(rel, n) })
+            }
+        }
+        val dateRe = Regex("\\d{4}-\\d{2}-\\d{2}")
+        val folders = list("").filter { it.isDir && it.name != com.modwahi.waarchiver.core.LOG_DIR_REMOTE }
+        var fetched = 0
+        folders.forEachIndexed { i, f ->
+            progress("تنزيل للقراءة: ${f.name}", i.toDouble() / folders.size)
+            for (day in list(f.name).filter { it.isDir && dateRe.matches(it.name) }) {
+                val json = list("${f.name}/${day.name}").firstOrNull { !it.isDir && it.name == com.modwahi.waarchiver.core.JSON_NAME } ?: continue
+                if (json.size > 0 && json.size == mirror.size(f.name, day.name)) continue
+                read("${f.name}/${day.name}", json.name)?.let { mirror.save(f.name, day.name, it); fetched++ }
+            }
+        }
+        return fetched
     }
 
     private fun saveRun(s: Summary, exported: String?, scheduled: Boolean) {

@@ -7,6 +7,7 @@ import android.os.PowerManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
@@ -57,6 +58,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var nextCheckAt by mutableStateOf<Long?>(null); private set
     var batteryExempt by mutableStateOf(true); private set
     var phoneContactsCount by mutableStateOf(0); private set
+    /** أسماء جهات الاتصال في التلفون (إن فُعّلت) */
+    var phoneContacts by mutableStateOf<Map<String, String>>(emptyMap()); private set
+    /** المحادثات المتوفرة للقراءة داخل التطبيق */
+    var readable by mutableStateOf<List<com.modwahi.waarchiver.work.Mirror.ChatDir>>(emptyList()); private set
     var listError by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
     var crash by mutableStateOf(App.crashFile(app).takeIf { it.exists() }?.readText())
@@ -99,7 +104,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             job = Job(action, active.progress.getString("stage") ?: "في الانتظار…", active.progress.getInt("pct", -1))
             return
         }
-        val wasList = job?.action == "list"
+        val wasList = job?.action == "list" || job?.action == "mirror"
         job = null
         val done = infos.lastOrNull()
         if (wasList && done?.state == WorkInfo.State.FAILED) listError = done.outputData.getString("error")
@@ -115,13 +120,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         batteryExempt = getApplication<Application>().getSystemService(PowerManager::class.java)
             .isIgnoringBatteryOptimizations(getApplication<Application>().packageName)
         viewModelScope.launch {
-            val (age, prog, count) = withContext(Dispatchers.IO) {
+            val (age, prog, phone) = withContext(Dispatchers.IO) {
                 Triple(engine.backupAgeHours(), engine.chatProgress(),
-                    if (prefs.importContacts) runCatching { PhoneContacts.read(getApplication(), prefs.countryCode).size }.getOrDefault(0) else 0)
+                    if (prefs.importContacts) runCatching { PhoneContacts.read(getApplication(), prefs.countryCode) }.getOrDefault(emptyMap()) else emptyMap())
             }
             backupAge = age
             progressByChat = prog
-            phoneContactsCount = count
+            phoneContacts = phone
+            phoneContactsCount = phone.size
+            readable = withContext(Dispatchers.IO) { engine.mirror.chats() }
         }
     }
 
@@ -221,7 +228,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         saveChoices(choices + (jid to c.copy(folder = folder.trim())))
     }
 
-    fun setOwnerName(jid: String, name: String) = setName(Archiver.numberOf(jid), name)
+    fun setOwnerName(c: KnownChat, name: String) = setName(phoneOf(c), name)
+
+    /** تنزيل ما أُرشف سابقاً من الوجهة للقراءة داخل التطبيق */
+    fun syncReadable() {
+        listError = null
+        ArchiveWorker.enqueue(getApplication(), "mirror")
+    }
+
+    fun dayMessages(folder: String, date: String) = engine.mirror.day(folder, date)
+
+    private val images = android.util.LruCache<String, androidx.compose.ui.graphics.ImageBitmap>(40)
+
+    /** صورة مصغّرة من مجلد واتساب (قراءة فقط) لعرضها في القارئ. null إن لم تعد موجودة. */
+    suspend fun thumbnail(rel: String): androidx.compose.ui.graphics.ImageBitmap? = images.get(rel) ?: withContext(Dispatchers.IO) {
+        runCatching {
+            val f = engine.source().media(rel) ?: return@runCatching null
+            val bounds = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            f.open().use { android.graphics.BitmapFactory.decodeStream(it, null, bounds) }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= 720) sample *= 2
+            val bmp = f.open().use { android.graphics.BitmapFactory.decodeStream(it, null, android.graphics.BitmapFactory.Options().apply { inSampleSize = sample }) }
+            bmp?.asImageBitmap()
+        }.getOrNull()?.also { images.put(rel, it) }
+    }
 
     fun setName(number: String, name: String) {
         val num = Naming.normalizeNumber(number)
@@ -232,18 +262,27 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         prefs.contacts = m
     }
 
+    /** الرقم الحقيقي للمحادثة الخاصة (حتى لو كان معرّفها @lid) */
+    fun phoneOf(c: KnownChat): String = c.phone.ifEmpty { Archiver.numberOf(c.jid) }
+
+    /** الاسم لرقم: ما كتبته في التطبيق، ثم جهات الاتصال */
+    fun nameFor(number: String): String? =
+        contacts[number]?.takeIf { it.isNotBlank() } ?: phoneContacts[number]?.takeIf { it.isNotBlank() }
+
     fun displayName(c: KnownChat): String {
         if (c.subject.isNotEmpty()) return c.subject
-        val num = Archiver.numberOf(c.jid)
-        return contacts[num]?.takeIf { it.isNotBlank() } ?: if (num.isNotEmpty()) ltr("+$num") else c.jid.substringBefore('@')
+        val num = phoneOf(c)
+        nameFor(num)?.let { return it }
+        if (c.pushName.isNotEmpty()) return "~" + c.pushName
+        return if (num.isNotEmpty()) ltr("+$num") else c.jid.substringBefore('@')
     }
 
     /** اسم المجلد الذي سيُستخدم إن تُرك الحقل فارغاً (الاسم المستخدم سابقاً إن وُجد). */
     fun defaultFolder(c: KnownChat): String {
         progressByChat[c.jid]?.folder?.takeIf { it.isNotEmpty() }?.let { return it }
+        val num = phoneOf(c)
         val name = c.subject.ifEmpty {
-            val num = Archiver.numberOf(c.jid)
-            contacts[num]?.takeIf { it.isNotEmpty() } ?: num.ifEmpty { c.jid }
+            nameFor(num) ?: if (c.jid.endsWith("@lid")) c.pushName.ifEmpty { num.ifEmpty { c.jid } } else num.ifEmpty { c.jid }
         }
         return Naming.sanitizeName(name)
     }

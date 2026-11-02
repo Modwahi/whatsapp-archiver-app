@@ -200,6 +200,12 @@ class DriveUploader(
         return cur
     }
 
+    /** محتوى مجلد في الدرايف (لمزامنة نسخة القراءة) */
+    fun list(relDir: String): List<Entry> {
+        val dir = dirId(relDir, create = false) ?: return emptyList()
+        return children(dir).values.map { Entry(it.name, it.mime == DriveClient.FOLDER_MIME, it.size) }
+    }
+
     override fun readFile(relDir: String, name: String): ByteArray? {
         val dir = dirId(relDir, create = false) ?: return null
         val f = children(dir)[name]?.takeIf { it.mime != DriveClient.FOLDER_MIME } ?: return null

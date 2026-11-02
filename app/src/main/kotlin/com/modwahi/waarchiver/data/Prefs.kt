@@ -15,6 +15,10 @@ data class KnownChat(
     val isGroup: Boolean,
     val count: Long,
     val lastTs: Long,
+    /** الرقم الحقيقي (حتى لمحادثات @lid) */
+    val phone: String = "",
+    /** الاسم الذي وضعه الشخص لنفسه */
+    val pushName: String = "",
 )
 
 /** إعدادات محادثة مختارة: اسم المجلد (اختياري) واسم صاحب الرقم للمحادثات الخاصة. */
@@ -126,13 +130,14 @@ class Prefs(context: Context) {
             val a = JSONArray(s)
             (0 until a.length()).map { i ->
                 val o = a.getJSONObject(i)
-                KnownChat(o.getString("jid"), o.optString("subject"), o.optBoolean("group"), o.optLong("count"), o.optLong("last"))
+                KnownChat(o.getString("jid"), o.optString("subject"), o.optBoolean("group"), o.optLong("count"), o.optLong("last"),
+                    o.optString("phone"), o.optString("push"))
             }
         } ?: emptyList()
         set(v) = put {
             putString("known_chats", JSONArray(v.map {
                 JSONObject().put("jid", it.jid).put("subject", it.subject).put("group", it.isGroup)
-                    .put("count", it.count).put("last", it.lastTs)
+                    .put("count", it.count).put("last", it.lastTs).put("phone", it.phone).put("push", it.pushName)
             }).toString())
         }
 

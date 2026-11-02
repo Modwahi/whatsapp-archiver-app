@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.Sort
 import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.Contacts
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.Forum
 import androidx.compose.material.icons.rounded.Refresh
@@ -55,7 +56,7 @@ import androidx.compose.ui.unit.dp
 import com.modwahi.waarchiver.data.KnownChat
 
 @Composable
-fun ChatsScreen(vm: AppViewModel, embedded: Boolean = false) {
+fun ChatsScreen(vm: AppViewModel, a: Actions? = null, embedded: Boolean = false) {
     var query by rememberSaveable { mutableStateOf("") }
     var filter by rememberSaveable { mutableIntStateOf(0) } // 0 الكل، 1 المختارة، 2 مجموعات، 3 خاص
     var sort by rememberSaveable { mutableStateOf(SortBy.RECENT) }
@@ -72,6 +73,16 @@ fun ChatsScreen(vm: AppViewModel, embedded: Boolean = false) {
             return@Column
         }
 
+        if (!vm.importContacts && a != null) {
+            AppCard(Modifier.padding(bottom = 8.dp)) {
+                Row(Modifier.padding(start = 12.dp, end = 8.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconBadge(Icons.Rounded.Contacts, Tone.INFO, 36)
+                    Spacer(Modifier.width(10.dp))
+                    Text("أظهر الأسماء من جهات اتصالك بدل الأرقام", style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+                    TextButton(onClick = { a.requestContacts() }) { Text("تفعيل") }
+                }
+            }
+        }
         OutlinedTextField(
             value = query, onValueChange = { query = it },
             leadingIcon = { Icon(Icons.Rounded.Search, null) },
@@ -85,11 +96,11 @@ fun ChatsScreen(vm: AppViewModel, embedded: Boolean = false) {
         }
 
         val q = query.trim()
-        val list = remember(vm.known, vm.choices, vm.contacts, q, filter, sort) {
+        val list = remember(vm.known, vm.choices, vm.contacts, vm.phoneContacts, q, filter, sort) {
             vm.known.filter { c ->
                 val sel = vm.choices[c.jid]?.selected == true
                 (filter == 0 || (filter == 1 && sel) || (filter == 2 && c.isGroup) || (filter == 3 && !c.isGroup)) &&
-                    (q.isEmpty() || vm.displayName(c).contains(q, ignoreCase = true) || c.jid.contains(q))
+                    (q.isEmpty() || vm.displayName(c).contains(q, ignoreCase = true) || vm.phoneOf(c).contains(q.filter { it.isDigit() }.ifEmpty { "\u0000" }) || c.jid.contains(q))
             }.let { l ->
                 when (sort) {
                     SortBy.RECENT -> l
@@ -178,7 +189,7 @@ private fun ChatRow(vm: AppViewModel, c: KnownChat, onEdit: () -> Unit) {
 @Composable
 private fun EditChatSheet(vm: AppViewModel, c: KnownChat, onDismiss: () -> Unit) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val num = com.modwahi.waarchiver.core.Archiver.numberOf(c.jid)
+    val num = vm.phoneOf(c)
     var owner by remember { mutableStateOf(vm.contacts[num] ?: "") }
     var folder by remember { mutableStateOf(vm.choices[c.jid]?.folder ?: "") }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = state) {
@@ -193,14 +204,14 @@ private fun EditChatSheet(vm: AppViewModel, c: KnownChat, onDismiss: () -> Unit)
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-            if (!c.isGroup) OutlinedTextField(value = owner, onValueChange = { owner = it }, label = { Text("اسم صاحب الرقم") },
+            if (!c.isGroup && num.isNotEmpty()) OutlinedTextField(value = owner, onValueChange = { owner = it }, label = { Text("اسم صاحب الرقم") },
                 supportingText = { Text("يظهر في الرسائل بدل الرقم") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             OutlinedTextField(value = folder, onValueChange = { folder = it }, label = { Text("اسم المجلد") },
                 placeholder = { Text(vm.defaultFolder(c)) },
                 supportingText = { Text("اتركه فارغاً لاستخدام: ${vm.defaultFolder(c)}") }, singleLine = true, modifier = Modifier.fillMaxWidth())
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 Button(onClick = {
-                    if (!c.isGroup) vm.setOwnerName(c.jid, owner)
+                    if (!c.isGroup && num.isNotEmpty()) vm.setOwnerName(c, owner)
                     vm.setFolder(c.jid, folder)
                     onDismiss()
                 }, modifier = Modifier.weight(1f)) { Text("حفظ") }

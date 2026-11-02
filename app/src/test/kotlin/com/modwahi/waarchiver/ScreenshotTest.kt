@@ -66,6 +66,8 @@ class ScreenshotTest {
             KnownChat("120363999999999999@g.us", "العائلة", true, 9520, now - 86400),
             KnownChat("967771111111@s.whatsapp.net", "", false, 77, now - 3 * 86400),
             KnownChat("120363222222222222@g.us", "مشتريات المحل", true, 2211, now - 5 * 86400),
+            KnownChat("145479585235031@lid", "", false, 8, now - 6 * 86400, "967772222222", "سالم المحاسب"),
+            KnownChat("127097158803600@lid", "", false, 25, now - 6 * 86400, "967771111111", ""),
         )
         p.knownChatsAt = System.currentTimeMillis() - 3 * 3600_000
         p.choices = listOf(ChatChoice("120363111111111111@g.us", true), ChatChoice("967773333333@s.whatsapp.net", true, "العميل سعيد"))
@@ -123,6 +125,21 @@ class ScreenshotTest {
         shot("7_setup_folder")
         rule.onNodeWithText("التالي").performClick()
         shot("8_setup_key")
+    }
+
+    @Test fun reader() {
+        seed(true)
+        val app = ApplicationProvider.getApplicationContext<Application>()
+        val src = File("../core/src/test/resources/fixtures/full_sequence/step3/expected/remote")
+        src.walkTopDown().filter { it.name == "الرسائل.json" }.forEach { f ->
+            val rel = f.relativeTo(src).path
+            File(app.filesDir, "mirror/$rel").apply { parentFile!!.mkdirs(); writeBytes(f.readBytes()) }
+        }
+        render()
+        rule.onNodeWithText("الرسائل").performClick()
+        shot("10_reader_list")
+        rule.onNodeWithText("طلبات التحويل_ الشركة").performClick()
+        shot("11_reader_chat")
     }
 
     @Test fun chatEdit() {

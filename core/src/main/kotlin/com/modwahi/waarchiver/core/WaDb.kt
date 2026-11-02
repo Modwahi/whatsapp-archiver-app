@@ -30,6 +30,10 @@ data class ChatInfo(
     val isGroup: Boolean,
     val messageCount: Long = 0,
     val lastTimestamp: Long = 0, // ثوانٍ
+    /** للعرض فقط: الرقم الحقيقي (أرقام فقط) — يُستخرج من jid_map لمحادثات @lid */
+    val phone: String = "",
+    /** للعرض فقط: الاسم الذي وضعه الشخص لنفسه (push name) */
+    val pushName: String = "",
 )
 
 data class Message(
@@ -181,12 +185,19 @@ class WaDb(path: File, private val opener: SqlOpener) : AutoCloseable {
         return raw ?: ""
     }
 
+    /** رقم الهاتف الحقيقي لـ jid (يحوّل @lid عبر jid_map)، أو "" للمجموعات والمعرّفات المجهولة. */
+    fun phoneOf(rowId: Long?, jid: String): String {
+        val real = if (jid.endsWith("@lid")) resolveJid(rowId, jid) else jid
+        return if (real.endsWith("@s.whatsapp.net") || real.endsWith("@c.us"))
+            Naming.normalizeNumber(real.substringBefore('@').substringBefore(':')) else ""
+    }
+
     // ---------- المحادثات ----------
     fun listChats(): List<ChatInfo> {
         val subject = col("chat", "subject", "subject", "c")
         val hidden = if (has("chat", "hidden")) "AND COALESCE(c.hidden,0)=0" else ""
         val q = """
-            SELECT c._id AS row_id, j.raw_string AS jid, $subject,
+            SELECT c._id AS row_id, c.jid_row_id AS jid_row, j.raw_string AS jid, $subject,
                    agg.cnt AS cnt, agg.last_ts AS last_ts
             FROM chat c JOIN jid j ON j._id = c.jid_row_id
             LEFT JOIN (
@@ -202,6 +213,8 @@ class WaDb(path: File, private val opener: SqlOpener) : AutoCloseable {
                 subject = (r["subject"] as? String)?.takeIf { it.isNotEmpty() } ?: "",
                 isGroup = jid.endsWith("@g.us"), messageCount = r["cnt"].asLong(),
                 lastTimestamp = Math.floorDiv(r["last_ts"].asLong(), 1000L),
+                phone = phoneOf(r["jid_row"]?.asLong(), jid),
+                pushName = r["jid_row"]?.asLong()?.let { pushNames[it] } ?: "",
             )
         }
         return out.sortedByDescending { it.lastTimestamp }

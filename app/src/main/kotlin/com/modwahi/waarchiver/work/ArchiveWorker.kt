@@ -94,7 +94,7 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val engine = Engine(applicationContext)
         val prefs = engine.prefs
-        if (!prefs.setupDone && action != "list") return@withContext Result.success()
+        if (!prefs.setupDone && action != "list" && action != "mirror") return@withContext Result.success()
         try {
             // إشعار foreground أثناء التشغيل. قد يرفضه أندرويد 12+ إن كان التطبيق في الخلفية ولم يُستثنَ من
             // تحسين البطارية — نكمل بدونه.
@@ -106,6 +106,10 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                 "list" -> {
                     engine.listChats(report)
                     Result.success(workDataOf("ok" to true))
+                }
+                "mirror" -> {
+                    val n = engine.syncMirror(report)
+                    Result.success(workDataOf("ok" to true, "fetched" to n))
                 }
                 else -> {
                     val (summary, exported) = engine.run(scheduled = action == "scheduled", dryRun = action == "dry", progress = report)
@@ -130,7 +134,7 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
             // Throwable وليس Exception فقط: حتى أخطاء مثل OutOfMemoryError تظهر رسالة بدل انهيار التطبيق
             val msg = (e.message ?: "") .let { if (e is Exception && it.isNotEmpty()) it else "${e.javaClass.simpleName}: $it" }
             engine.log.error(msg + "\n" + com.modwahi.waarchiver.App.describe(e))
-            if (action == "list") return@withContext Result.failure(workDataOf("error" to msg))
+            if (action == "list" || action == "mirror") return@withContext Result.failure(workDataOf("error" to msg))
             Notifier.failure(applicationContext, msg)
             Result.success(workDataOf("ok" to false, "error" to msg))
         }

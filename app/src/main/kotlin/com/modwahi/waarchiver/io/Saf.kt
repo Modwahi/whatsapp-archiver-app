@@ -14,6 +14,9 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.InputStream
 
+/** عنصر في مجلد الوجهة */
+data class Entry(val name: String, val isDir: Boolean, val size: Long)
+
 private data class DocInfo(val uri: Uri, val name: String, val size: Long, val mtimeMs: Long, val mime: String)
 
 private fun ContentResolver.info(uri: Uri): DocInfo? = try {
@@ -120,6 +123,12 @@ class SafUploader(private val context: Context, private val tree: Uri) : Uploade
             }
         }
         return cur
+    }
+
+    /** محتوى مجلد في الوجهة (لمزامنة نسخة القراءة) */
+    fun list(relDir: String): List<Entry> {
+        val dir = findDir(relDir, create = false) ?: return emptyList()
+        return children(dir).values.map { Entry(it.name, it.mime == Document.MIME_TYPE_DIR, it.size) }
     }
 
     override fun readFile(relDir: String, name: String): ByteArray? {
