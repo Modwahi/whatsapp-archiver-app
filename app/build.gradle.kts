@@ -5,9 +5,11 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-// التوقيع: من متغيرات البيئة (GitHub Actions) أو keystore.properties محلياً. بدونها يُوقّع بمفتاح debug.
+// التوقيع: من متغيرات البيئة (أسرار GitHub إن وُجدت)، أو keystore.properties محلياً،
+// وإلا من المفتاح الثابت في signing/ (المستودع خاص) حتى تكون بصمة كل البناءات واحدة.
 val signingProps = Properties().apply {
-    val f = rootProject.file("keystore.properties")
+    val f = rootProject.file("keystore.properties").takeIf { it.exists() }
+        ?: rootProject.file("signing/signing.properties")
     if (f.exists()) f.inputStream().use { load(it) }
 }
 fun signingValue(env: String, prop: String): String? = System.getenv(env) ?: signingProps.getProperty(prop)

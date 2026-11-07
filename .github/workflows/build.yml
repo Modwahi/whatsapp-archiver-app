@@ -45,8 +45,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::أسرار التوقيع غير موجودة. أضف SIGNING_KEYSTORE_BASE64 و SIGNING_STORE_PASSWORD و SIGNING_KEY_ALIAS و SIGNING_KEY_PASSWORD في Settings → Secrets and variables → Actions ثم أعد التشغيل (Re-run)."
-            exit 1
+            echo "::notice::لا توجد أسرار توقيع؛ سيُستخدم المفتاح الثابت في signing/."
+            exit 0
           fi
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
           {
