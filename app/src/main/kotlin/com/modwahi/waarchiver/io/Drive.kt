@@ -198,6 +198,18 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
         }.sortedWith(compareByDescending<ArchiveRoot> { it.lastRunMs }.thenBy { it.createdMs })
     }
 
+    /** ملفات بهذا الاسم داخل عدة مجلدات بطلب واحد: (ID المجلد الأب ← الملف) */
+    fun filesIn(parentIds: List<String>, name: String): Map<String, DFile> {
+        if (parentIds.isEmpty()) return emptyMap()
+        val q = "(" + parentIds.joinToString(" or ") { "'${q(it)}' in parents" } + ") and name = '${q(name)}' and trashed = false"
+        val out = HashMap<String, DFile>()
+        for (o in query(q, "id,name,mimeType,size,trashed,parents")) {
+            val parent = o.optJSONArray("parents")?.optString(0) ?: continue
+            out[parent] = parse(o)
+        }
+        return out
+    }
+
     fun createFolder(name: String, parentId: String?): String {
         val meta = JSONObject().put("name", name).put("mimeType", FOLDER_MIME)
         if (parentId != null) meta.put("parents", JSONArray().put(parentId))
@@ -238,7 +250,7 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
 class DriveUploader(
     private val drive: DriveClient,
     private val rootId: String,
-) : Uploader {
+) : Uploader, RemoteSizes {
     private val dirIds = HashMap<String, String>()               // مسار نسبي ← ID
     private val listings = HashMap<String, MutableMap<String, DriveClient.DFile>>() // ID ← (اسم ← ملف)
     private val pool = java.util.concurrent.Executors.newFixedThreadPool(3)
@@ -273,7 +285,44 @@ class DriveUploader(
         return children(dir).values.map { Entry(it.name, it.mime == DriveClient.FOLDER_MIME, it.size) }
     }
 
+    // أحجام «الرسائل.json» لكل أيام المحادثة، تُجلب بطلبات قليلة بدل طلب لكل يوم
+    private val jsonMeta = HashMap<String, DriveClient.DFile?>()   // ID مجلد اليوم ← الملف (null: غير موجود)
+    private val prefetchedChats = HashSet<String>()
+
+    @Synchronized
+    private fun prefetchChat(chat: String) {
+        if (!prefetchedChats.add(chat)) return
+        val chatId = dirId(chat, create = false) ?: return
+        val days = children(chatId).values.filter { it.mime == DriveClient.FOLDER_MIME }
+        for (d in days) dirIds["$chat/${d.name}"] = d.id
+        for (chunk in days.chunked(40)) {
+            val found = drive.filesIn(chunk.map { it.id }, com.modwahi.waarchiver.core.JSON_NAME)
+            for (d in chunk) jsonMeta[d.id] = found[d.id]
+        }
+    }
+
+    private fun jsonFile(relDir: String): Pair<Boolean, DriveClient.DFile?> {
+        val chat = relDir.substringBefore('/')
+        if (relDir.count { it == '/' } == 1) prefetchChat(chat)
+        val dir = dirId(relDir, create = false) ?: return true to null
+        synchronized(this) { if (jsonMeta.containsKey(dir)) return true to jsonMeta[dir] }
+        return false to null
+    }
+
+    override fun remoteSize(relDir: String, name: String): Long? {
+        if (name == com.modwahi.waarchiver.core.JSON_NAME) {
+            val (known, f) = jsonFile(relDir)
+            if (known) return f?.size
+        }
+        val dir = dirId(relDir, create = false) ?: return null
+        return children(dir)[name]?.takeIf { it.mime != DriveClient.FOLDER_MIME }?.size
+    }
+
     override fun readFile(relDir: String, name: String): ByteArray? {
+        if (name == com.modwahi.waarchiver.core.JSON_NAME) {
+            val (known, f) = jsonFile(relDir)
+            if (known) return f?.let { drive.download(it.id) }
+        }
         val dir = dirId(relDir, create = false) ?: return null
         val f = children(dir)[name]?.takeIf { it.mime != DriveClient.FOLDER_MIME } ?: return null
         return drive.download(f.id)

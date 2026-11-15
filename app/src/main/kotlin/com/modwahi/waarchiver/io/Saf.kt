@@ -14,6 +14,11 @@ import java.io.File
 import java.io.FileNotFoundException
 import java.io.InputStream
 
+/** حجم ملف في الوجهة بدون تنزيله (null: غير موجود). يُستخدم لمطابقة نسخة القراءة المحفوظة على التلفون. */
+interface RemoteSizes {
+    fun remoteSize(relDir: String, name: String): Long?
+}
+
 /** عنصر في مجلد الوجهة */
 data class Entry(val name: String, val isDir: Boolean, val size: Long)
 
@@ -86,7 +91,7 @@ class SafSource(private val context: Context, treeUri: Uri) : SourceFs {
  * «حفظ محلي فقط»: نفس شجرة الدرايف لكن في مجلد يختاره المستخدم على التلفون (SAF).
  * لا حذف أبداً: نُنشئ الملفات أو نكتب فوق الرسائل.json/txt فقط.
  */
-class SafUploader(private val context: Context, private val tree: Uri) : Uploader {
+class SafUploader(private val context: Context, private val tree: Uri) : Uploader, RemoteSizes {
     private val cr = context.contentResolver
     private val rootDoc = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
     private val childCache = HashMap<Uri, MutableMap<String, DocInfo>>()
@@ -129,6 +134,11 @@ class SafUploader(private val context: Context, private val tree: Uri) : Uploade
     fun list(relDir: String): List<Entry> {
         val dir = findDir(relDir, create = false) ?: return emptyList()
         return children(dir).values.map { Entry(it.name, it.mime == Document.MIME_TYPE_DIR, it.size) }
+    }
+
+    override fun remoteSize(relDir: String, name: String): Long? {
+        val dir = findDir(relDir, create = false) ?: return null
+        return children(dir)[name]?.size
     }
 
     override fun readFile(relDir: String, name: String): ByteArray? {

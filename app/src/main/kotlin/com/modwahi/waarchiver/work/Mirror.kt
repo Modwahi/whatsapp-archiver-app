@@ -36,6 +36,8 @@ class Mirror(val root: File) {
 
     fun size(folder: String, date: String): Long = File(root, "$folder/$date/$JSON_NAME").length()
 
+    fun bytes(folder: String, date: String): ByteArray? = File(root, "$folder/$date/$JSON_NAME").takeIf { it.isFile }?.readBytes()
+
     fun save(folder: String, date: String, data: ByteArray) = writeAtomic(File(root, "$folder/$date/$JSON_NAME"), data)
 
     /** ينسخ ملفات الرسائل.json من مجلد مرفوع إلى نسخة القراءة */
@@ -50,7 +52,20 @@ class Mirror(val root: File) {
 
 /** يرفع كالمعتاد، ثم يحفظ نسخة القراءة بعد نجاح الرفع فقط */
 class MirroringUploader(val inner: Uploader, private val mirror: Mirror) : Uploader {
-    override fun readFile(relDir: String, name: String) = inner.readFile(relDir, name)
+    /**
+     * ملف اليوم: إن كانت نسخة القراءة على التلفون بنفس حجم الملف في الوجهة نقرؤها مباشرة بدل تنزيله.
+     * (هي نفس الملف الذي رفعه التطبيق.) عند أي شك نرجع للتنزيل العادي.
+     */
+    override fun readFile(relDir: String, name: String): ByteArray? {
+        val sizer = inner as? com.modwahi.waarchiver.io.RemoteSizes
+        val parts = relDir.split('/')
+        if (name == JSON_NAME && sizer != null && parts.size == 2) {
+            val remote = try { sizer.remoteSize(relDir, name) } catch (e: Exception) { return inner.readFile(relDir, name) }
+            if (remote == null) return null
+            if (remote > 0 && mirror.size(parts[0], parts[1]) == remote) mirror.bytes(parts[0], parts[1])?.let { return it }
+        }
+        return inner.readFile(relDir, name)
+    }
     override fun uploadDir(localDir: File, relDir: String) = uploadDir(localDir, relDir) { }
 
     override fun uploadDir(localDir: File, relDir: String, onBytes: (Long) -> Unit) {
