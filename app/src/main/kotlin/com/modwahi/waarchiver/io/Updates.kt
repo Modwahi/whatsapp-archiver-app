@@ -22,7 +22,6 @@ import java.util.concurrent.TimeUnit
  */
 object Updates {
     const val REPO = "Modwahi/whatsapp-archiver-app"
-    private const val LATEST = "https://api.github.com/repos/$REPO/releases/latest"
 
     data class Release(val version: String, val notes: String, val apkUrl: String, val apkName: String, val apkSize: Long, val page: String)
 
@@ -40,24 +39,56 @@ object Updates {
         return false
     }
 
-    /** آخر إصدار منشور فيه ملف APK، أو null */
+    private fun parseRelease(o: JSONObject): Release? {
+        if (o.optBoolean("draft") || o.optBoolean("prerelease")) return null
+        val assets = o.optJSONArray("assets") ?: return null
+        for (i in 0 until assets.length()) {
+            val a = assets.getJSONObject(i)
+            val name = a.optString("name")
+            if (name.endsWith(".apk")) {
+                return Release(o.optString("tag_name").removePrefix("v"), o.optString("body"),
+                    a.getString("browser_download_url"), name, a.optLong("size"), o.optString("html_url"))
+            }
+        }
+        return null
+    }
+
+    private fun get(url: String): okhttp3.Response = http.newCall(Request.Builder().url(url)
+        .header("Accept", "application/vnd.github+json")
+        .header("Cache-Control", "no-cache")
+        .cacheControl(okhttp3.CacheControl.FORCE_NETWORK)
+        .build()).execute()
+
+    /**
+     * أحدث إصدار فيه ملف APK، أو null.
+     * لا نعتمد على /releases/latest وحده لأن خوادم GitHub قد تُرجع نسخة قديمة منه لدقائق في بعض المناطق:
+     * نقرأ قائمة الإصدارات (بدون ذاكرة مؤقتة) ونأخذ أعلى رقم، ونتحقق أيضاً من صفحة الإصدار الأخير في الموقع.
+     */
     fun latest(): Release? {
-        val req = Request.Builder().url(LATEST).header("Accept", "application/vnd.github+json").build()
-        http.newCall(req).execute().use { r ->
-            if (r.code == 404) return null
-            if (!r.isSuccessful) throw IllegalStateException("تعذّر فحص التحديثات (${r.code})")
-            val o = JSONObject(r.body.string())
-            val assets = o.optJSONArray("assets") ?: return null
-            for (i in 0 until assets.length()) {
-                val a = assets.getJSONObject(i)
-                val name = a.optString("name")
-                if (name.endsWith(".apk")) {
-                    return Release(o.optString("tag_name").removePrefix("v"), o.optString("body"),
-                        a.getString("browser_download_url"), name, a.optLong("size"), o.optString("html_url"))
+        val found = ArrayList<Release>()
+        var lastError: Exception? = null
+        try {
+            get("https://api.github.com/repos/$REPO/releases?per_page=10&t=${System.currentTimeMillis()}").use { r ->
+                if (!r.isSuccessful) throw IllegalStateException("تعذّر فحص التحديثات (${r.code})")
+                val a = org.json.JSONArray(r.body.string())
+                for (i in 0 until a.length()) parseRelease(a.getJSONObject(i))?.let(found::add)
+            }
+        } catch (e: Exception) { lastError = e }
+        // طريق ثانٍ: صفحة «آخر إصدار» في الموقع تحوّل إلى /releases/tag/vX.Y.Z
+        try {
+            val noRedirect = http.newBuilder().followRedirects(false).followSslRedirects(false).build()
+            noRedirect.newCall(Request.Builder().url("https://github.com/$REPO/releases/latest")
+                .header("Cache-Control", "no-cache").build()).execute().use { r ->
+                val tag = r.header("Location")?.substringAfter("/releases/tag/", "")?.takeIf { it.isNotEmpty() }
+                if (tag != null && found.none { it.version == tag.removePrefix("v") }) {
+                    get("https://api.github.com/repos/$REPO/releases/tags/$tag").use { t ->
+                        if (t.isSuccessful) parseRelease(JSONObject(t.body.string()))?.let(found::add)
+                    }
                 }
             }
-            return null
-        }
+        } catch (e: Exception) { if (found.isEmpty()) lastError = lastError ?: e }
+        if (found.isEmpty() && lastError != null) throw lastError
+        return found.maxWithOrNull { a, b -> if (newer(a.version, b.version)) 1 else if (newer(b.version, a.version)) -1 else 0 }
     }
 
     /** ينزّل الـ APK إلى cache التطبيق مع التقدّم (0..1) */
