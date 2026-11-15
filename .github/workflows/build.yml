@@ -100,3 +100,44 @@ jobs:
             - SHA-1 لمفتاح التوقيع (يُستخدم في OAuth client على Google Cloud): `${{ steps.cert.outputs.sha1 }}`
 
             خطوات الإعداد في [اقرأني.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/اقرأني.md).
+
+  # إصدار بدون أسرار: عند الدمج في main، أحدث APK موقّع في مجلد dist/ يُنشر كإصدار (إن لم يكن منشوراً).
+  # الـ APK يُوقّع خارج GitHub بمفتاح الإصدار، فلا يحتاج هذا الجزء أي أسرار.
+  publish-dist:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Find signed APK
+        id: apk
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          FILE=$(ls dist/whatsapp-archiver-v*.apk 2>/dev/null | sort -V | tail -1)
+          if [ -z "$FILE" ]; then echo "لا يوجد APK في dist/"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          TAG=$(basename "$FILE" .apk); TAG=${TAG#whatsapp-archiver-}
+          if gh release view "$TAG" >/dev/null 2>&1; then echo "الإصدار $TAG منشور مسبقاً"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0; fi
+          SDKB=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)
+          SHA1=$("$SDKB/apksigner" verify --print-certs "$FILE" | grep -m1 'SHA-1 digest' | awk '{print $NF}' | sed 's/../&:/g;s/:$//' | tr a-f A-F)
+          echo "::notice title=SHA-1::$SHA1"
+          { echo "file=$FILE"; echo "tag=$TAG"; echo "sha1=$SHA1"; echo "skip=false"; } >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release
+        if: steps.apk.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.apk.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: أرشيف واتساب ${{ steps.apk.outputs.tag }}
+          files: ${{ steps.apk.outputs.file }}
+          body: |
+            ## التثبيت
+            افتح هذه الصفحة من التلفون، واضغط على ملف الـ APK أدناه لتنزيله، ثم افتحه واسمح بتثبيت التطبيقات من هذا المصدر.
+            يُثبَّت فوق النسخة الموجودة، والإعدادات تبقى.
+
+            - الـ package: `com.modwahi.waarchiver`
+            - SHA-1 لمفتاح التوقيع (لـ OAuth client على Google Cloud): `${{ steps.apk.outputs.sha1 }}`
+
+            خطوات الإعداد في [اقرأني.md](https://github.com/${{ github.repository }}/blob/main/اقرأني.md).
