@@ -121,6 +121,23 @@ class Prefs(context: Context) {
         get() = str("country_code") ?: "967"
         set(v) = put { putString("country_code", v) }
 
+    /** فشل التشغيل المجدول لنفس النسخة (للانتظار المتزايد قبل إعادة المحاولة) */
+    var failState: com.modwahi.waarchiver.work.AutoPolicy.FailState?
+        get() = str("fail_state")?.let { runCatching {
+            val o = JSONObject(it)
+            com.modwahi.waarchiver.work.AutoPolicy.FailState(o.getLong("m"), o.getInt("c"), o.getLong("t"))
+        }.getOrNull() }
+        set(v) = put { putString("fail_state", v?.let { JSONObject().put("m", it.backupMtimeMs).put("c", it.count).put("t", it.lastAtMs).toString() }) }
+
+    /** آخر فحص تلقائي: {"time":ms, "tone":"ok|warn|error|info", "text":"..."} */
+    var lastAuto: JSONObject?
+        get() = str("last_auto")?.let { runCatching { JSONObject(it) }.getOrNull() }
+        set(v) = put { putString("last_auto", v?.toString()) }
+
+    var bgDeniedNotifiedDay: String?
+        get() = str("bg_denied_day")
+        set(v) = put { putString("bg_denied_day", v) }
+
     var staleNotifiedDay: String?
         get() = str("stale_notified")
         set(v) = put { putString("stale_notified", v) }

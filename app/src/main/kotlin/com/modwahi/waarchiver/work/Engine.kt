@@ -89,16 +89,15 @@ class Engine(private val context: Context) {
         fun closeIfOpen() { if (holder.isInitialized()) (holder.value as? DriveUploader)?.close() }
         override fun readFile(relDir: String, name: String) = inner.readFile(relDir, name)
         override fun uploadDir(localDir: File, relDir: String) = inner.uploadDir(localDir, relDir)
+        override fun uploadDir(localDir: File, relDir: String, onBytes: (Long) -> Unit) = inner.uploadDir(localDir, relDir, onBytes)
     }
 
-    private fun uploader(progress: (String, Double?) -> Unit): Uploader = when (prefs.mode) {
+    private fun uploader(): Uploader = when (prefs.mode) {
         Mode.LOCAL -> SafUploader(context, Uri.parse(prefs.localTreeUri
             ?: throw RunError("لم تختر مجلد الحفظ المحلي (الإعدادات ← وجهة الحفظ).")))
         Mode.DRIVE -> LazyUploader {
             val d = driveClient()
-            DriveUploader(d, ensureDriveFolder(d)) { done, total ->
-                progress("رفع الملفات $done من $total", done.toDouble() / total)
-            }
+            DriveUploader(d, ensureDriveFolder(d))
         }
     }
 
@@ -106,6 +105,19 @@ class Engine(private val context: Context) {
     fun verifyKey(key: String) {
         val b = source().backup() ?: throw RunError("لم أجد ملف النسخة الاحتياطية Databases/msgstore.db.crypt15 في المجلد المختار.")
         b.open().use { Crypt15.verifyKey(it, key) }
+    }
+
+    /**
+     * فحص سريع قبل التشغيل المجدول (بدون فك): نفس شروط الأداة.
+     * يرجع سبب التخطي، أو null إن كان هناك عمل.
+     */
+    fun scheduledSkipReason(): String? {
+        val b = runCatching { source().backup() }.getOrNull() ?: return null // عدم وجود النسخة يعالجه التشغيل نفسه
+        val last = com.modwahi.waarchiver.core.State(paths.state).lastBackupMtime
+        if (b.mtime <= last) return "لا توجد نسخة احتياطية جديدة منذ آخر أرشفة"
+        if (System.currentTimeMillis() / 1000.0 - b.mtime < com.modwahi.waarchiver.core.MIN_BACKUP_AGE_S)
+            return "النسخة الاحتياطية كُتبت للتو — سأحاول بعد قليل"
+        return null
     }
 
     fun backupMtimeMs(): Long? = runCatching { source().backup()?.mtime?.let { (it * 1000).toLong() } }.getOrNull()
@@ -142,7 +154,7 @@ class Engine(private val context: Context) {
     }.also(::saveKnown)
 
     /** التشغيل الحقيقي أو التجربة. يرجع null إن تم التخطي (لا نسخة جديدة في الوضع المجدول). */
-    fun run(scheduled: Boolean, dryRun: Boolean, progress: (String, Double?) -> Unit): Pair<Summary?, String?> {
+    fun run(scheduled: Boolean, dryRun: Boolean, progress: (com.modwahi.waarchiver.core.RunProgress) -> Unit): Pair<Summary?, String?> {
         val base = prefs.archiveConfig()
         // اسم المجلد ثابت: إن لم تكتب اسماً نستخدم الاسم الذي استُخدم أول مرة، حتى لا يتغير المجلد
         // لاحقاً إن أضفت اسم صاحب الرقم أو تغيّر اسم المجموعة
@@ -161,7 +173,7 @@ class Engine(private val context: Context) {
                 override fun readFile(relDir: String, name: String): ByteArray? = null
                 override fun uploadDir(localDir: File, relDir: String) {}
             }
-        } else MirroringUploader(uploader(progress), mirror)
+        } else MirroringUploader(uploader(), mirror)
         val summary = try {
             runArchive(cfg, paths, key(), source(), up, log, AndroidSql, contacts(),
                 dryRun = dryRun, scheduled = scheduled, dryDir = if (dryRun) dryDir else null,

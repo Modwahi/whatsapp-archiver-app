@@ -50,6 +50,7 @@ class ScreenshotTest {
         override fun openUrl(url: String) {}
         override fun requestContacts() {}
         override fun openDownloads() {}
+        override fun openAppSettings() {}
     }
 
     private fun seed(setupDone: Boolean) {
@@ -78,6 +79,8 @@ class ScreenshotTest {
             .put("chats", JSONArray().put(JSONObject().put("name", "طلبات التحويل_ الشركة").put("messages", 7).put("media", 2).put("missing", 1).put("large", 0).put("recovered", 0).put("error", JSONObject.NULL))
                 .put(JSONObject().put("name", "العميل سعيد").put("messages", 2).put("media", 0).put("missing", 0).put("large", 0).put("recovered", 0).put("error", JSONObject.NULL)))
         p.lastRun = run.toString()
+        p.lastAuto = JSONObject().put("time", System.currentTimeMillis() - 40 * 60_000).put("tone", "info")
+            .put("text", "لا توجد نسخة احتياطية جديدة منذ آخر أرشفة")
         p.history = listOf(run, JSONObject(run.toString()).put("time", run.getLong("time") - 86400_000).put("ok", false)
             .put("errors", JSONArray().put("انقطع الاتصال بـ Google Drive")))
     }
@@ -89,8 +92,9 @@ class ScreenshotTest {
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    private fun render(dark: Int = 0) {
+    private fun render(dark: Int = 0, job: com.modwahi.waarchiver.ui.Job? = null) {
         val vm = AppViewModel(ApplicationProvider.getApplicationContext())
+        vm.previewJob(job)
         vm.updateTheme(dark)
         rule.setContent {
             AppTheme(vm.themeMode) {
@@ -109,6 +113,13 @@ class ScreenshotTest {
         shot("3_settings")
         rule.onNodeWithText("سجل التشغيلات").performScrollTo().performClick()
         shot("4_history")
+    }
+
+    @Test fun uploading() {
+        seed(true)
+        render(job = com.modwahi.waarchiver.ui.Job("run", "رفع: طلبات التحويل_ الشركة", 71, 3,
+            done = 38_400_000, total = 87_200_000, speed = 1_250_000, eta = 39))
+        shot("12_uploading")
     }
 
     @Test fun dark() {

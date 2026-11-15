@@ -12,6 +12,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.OutOfQuotaPolicy
 import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -81,6 +82,9 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     override suspend fun getForegroundInfo(): ForegroundInfo = foreground("بدء التشغيل…", null)
 
     private var lastPct = -1
+    private var lastSentAt = 0L
+    private var uploadStartAt = 0L
+    private var uploadStartBytes = 0L
 
     private suspend fun progress(stage: String, pct: Double?) {
         if (isStopped) throw StoppedByUser()
@@ -91,15 +95,88 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         try { setForeground(foreground(stage, pct)) } catch (_: Throwable) {}
     }
 
+    /** تقدّم التشغيل كاملاً: نسبة كلية، وحجم الرفع، والسرعة، والوقت المتبقي */
+    private suspend fun runProgress(r: com.modwahi.waarchiver.core.RunProgress) {
+        if (isStopped) throw StoppedByUser()
+        val now = System.currentTimeMillis()
+        val p = (r.overall * 100).toInt()
+        if (p == lastPct && now - lastSentAt < 700) return
+        lastPct = p
+        lastSentAt = now
+        var speed = 0L
+        var eta = -1L
+        if (r.phase == 3 && r.bytesTotal > 0) {
+            if (uploadStartAt == 0L) { uploadStartAt = now; uploadStartBytes = r.bytesDone }
+            val secs = (now - uploadStartAt) / 1000.0
+            if (secs >= 2) {
+                speed = ((r.bytesDone - uploadStartBytes) / secs).toLong()
+                if (speed > 0) eta = ((r.bytesTotal - r.bytesDone) / speed)
+            }
+        }
+        setProgress(workDataOf("stage" to r.label, "pct" to p, "phase" to r.phase,
+            "done" to r.bytesDone, "total" to r.bytesTotal, "speed" to speed, "eta" to eta))
+        val text = if (r.phase == 3 && r.bytesTotal > 0)
+            "رفع ${Notifier.mb(r.bytesDone)} من ${Notifier.mb(r.bytesTotal)} ميغابايت"
+        else "${r.phase}/3 ${r.label}"
+        try { setForeground(foreground(text, r.overall)) } catch (_: Throwable) {}
+    }
+
+    private fun recordAuto(prefs: Prefs, tone: String, text: String) {
+        prefs.lastAuto = org.json.JSONObject().put("time", System.currentTimeMillis()).put("tone", tone).put("text", text)
+    }
+
+    /** سبب إيقاف أندرويد للعمل (للتشخيص) */
+    private fun stopReasonText(): String {
+        val r = if (Build.VERSION.SDK_INT >= 31) runCatching { stopReason }.getOrDefault(-1) else -1
+        return when (r) {
+            WorkInfo.STOP_REASON_TIMEOUT -> "انتهت المهلة التي يسمح بها أندرويد للعمل في الخلفية"
+            WorkInfo.STOP_REASON_CONSTRAINT_CHARGING -> "فُصل الشاحن"
+            WorkInfo.STOP_REASON_CONSTRAINT_CONNECTIVITY -> "انقطع الواي فاي"
+            WorkInfo.STOP_REASON_APP_STANDBY, WorkInfo.STOP_REASON_BACKGROUND_RESTRICTION ->
+                "أندرويد يقيّد التطبيق في الخلفية (البطارية)"
+            WorkInfo.STOP_REASON_QUOTA -> "استُهلكت حصة العمل في الخلفية"
+            WorkInfo.STOP_REASON_DEVICE_STATE -> "حالة الجهاز (توفير الطاقة)"
+            WorkInfo.STOP_REASON_CANCELLED_BY_APP, WorkInfo.STOP_REASON_USER -> "أوقفته يدوياً"
+            else -> "أوقفه النظام" + if (r > 0) " (رمز $r)" else ""
+        }
+    }
+
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         val engine = Engine(applicationContext)
         val prefs = engine.prefs
         if (!prefs.setupDone && action != "list" && action != "mirror") return@withContext Result.success()
+        val scheduled = action == "scheduled"
+        var backupMs: Long? = null
         try {
-            // إشعار foreground أثناء التشغيل. قد يرفضه أندرويد 12+ إن كان التطبيق في الخلفية ولم يُستثنَ من
-            // تحسين البطارية — نكمل بدونه.
-            try { setForeground(foreground("بدء التشغيل…", null)) } catch (e: Throwable) {
-                engine.log.warning("تعذّر إظهار إشعار التشغيل: ${e.javaClass.simpleName}")
+            if (scheduled) {
+                // ١) فحص سريع بدون فك: معظم الفحوص الساعية تنتهي هنا
+                engine.scheduledSkipReason()?.let { recordAuto(prefs, "info", it); checkStale(engine); return@withContext Result.success() }
+                backupMs = engine.backupMtimeMs()
+                // ٢) انتظار متزايد بعد الفشل لنفس النسخة
+                if (!AutoPolicy.mayRun(backupMs, prefs.failState, System.currentTimeMillis())) {
+                    val f = prefs.failState!!
+                    recordAuto(prefs, "warn", if (f.count >= AutoPolicy.MAX_FAILS)
+                        "توقفت المحاولات التلقائية لهذه النسخة بعد ${f.count} محاولات فاشلة — شغّله يدوياً أو انتظر النسخة القادمة"
+                    else "بانتظار إعادة المحاولة بعد فشل سابق")
+                    return@withContext Result.success()
+                }
+            }
+            // ٣) إشعار التشغيل (foreground): بدونه يوقف أندرويد العمل بعد ~10 دقائق
+            val fgOk = try { setForeground(foreground("بدء التشغيل…", null)); true } catch (e: Throwable) {
+                engine.log.warning("تعذّر بدء التشغيل في الخلفية: ${e.javaClass.simpleName}: ${e.message}")
+                false
+            }
+            if (scheduled && !fgOk) {
+                // لا نبدأ عملاً ثقيلاً سيُقطع في منتصفه
+                val msg = "أندرويد منع التطبيق من العمل في الخلفية. افتح التطبيق ← الرئيسية ← «اسمح بالعمل في الخلفية»، " +
+                    "وفي سامسونج: الإعدادات ← التطبيقات ← أرشيف واتساب ← البطارية ← «غير مقيّد»."
+                recordAuto(prefs, "error", msg)
+                val today = LocalDate.now().toString()
+                if (prefs.bgDeniedNotifiedDay != today) {
+                    prefs.bgDeniedNotifiedDay = today
+                    Notifier.failure(applicationContext, msg)
+                }
+                return@withContext Result.success()
             }
             val report: (String, Double?) -> Unit = { s, p -> kotlinx.coroutines.runBlocking { progress(s, p) } }
             when (action) {
@@ -112,31 +189,66 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     Result.success(workDataOf("ok" to true, "fetched" to n))
                 }
                 else -> {
-                    val (summary, exported) = engine.run(scheduled = action == "scheduled", dryRun = action == "dry", progress = report)
-                    if (isStopped) return@withContext Result.success() // أوقفه المستخدم: لا إشعار فشل
+                    val (summary, exported) = engine.run(scheduled = scheduled, dryRun = action == "dry",
+                        progress = { r -> kotlinx.coroutines.runBlocking { runProgress(r) } })
+                    if (isStopped) {
+                        if (scheduled) { recordAuto(prefs, "warn", "توقف قبل أن يكتمل: ${stopReasonText()}"); noteFailure(prefs, backupMs, null) }
+                        return@withContext Result.success()
+                    }
                     if (summary == null) {
+                        if (scheduled) recordAuto(prefs, "info", "لا توجد نسخة احتياطية جديدة منذ آخر أرشفة")
                         checkStale(engine)
                         return@withContext Result.success()
                     }
-                    if (!summary.ok) Notifier.failure(applicationContext, summary.errors.firstOrNull()
-                        ?: summary.chats.firstOrNull { it.error != null }?.let { "${it.name}: ${it.error}" } ?: "")
-                    else if (action == "dry") Notifier.info(applicationContext, "اكتملت التجربة", "الناتج في $exported")
-                    else if (prefs.notifySuccess) Notifier.info(applicationContext, "تمت الأرشفة ✓",
-                        "رسائل ${summary.chats.sumOf { it.messages }} و وسائط ${summary.chats.sumOf { it.media }} في ${summary.chats.size} محادثة")
+                    val firstError = summary.errors.firstOrNull()
+                        ?: summary.chats.firstOrNull { it.error != null }?.let { "${it.name}: ${it.error}" } ?: ""
+                    if (summary.ok) {
+                        if (!summary.dryRun) prefs.failState = null
+                        if (scheduled) recordAuto(prefs, "ok", "تمت الأرشفة: رسائل ${summary.chats.sumOf { it.messages }}، " +
+                            "وسائط ${summary.chats.sumOf { it.media }}")
+                    }
+                    when {
+                        !summary.ok && scheduled -> {
+                            recordAuto(prefs, "error", "فشل: $firstError")
+                            noteFailure(prefs, backupMs, firstError)
+                        }
+                        !summary.ok -> Notifier.failure(applicationContext, firstError)
+                        action == "dry" -> Notifier.info(applicationContext, "اكتملت التجربة", "الناتج في $exported")
+                        prefs.notifySuccess -> Notifier.info(applicationContext, "تمت الأرشفة ✓",
+                            "رسائل ${summary.chats.sumOf { it.messages }} و وسائط ${summary.chats.sumOf { it.media }} في ${summary.chats.size} محادثة")
+                    }
                     if (summary.warnings.isNotEmpty()) notifyStaleOnce(engine, summary.warnings.first())
                     Result.success(workDataOf("ok" to summary.ok, "exported" to exported))
                 }
             }
+        } catch (e: com.modwahi.waarchiver.core.BusyError) {
+            // تشغيل آخر يعمل (يدوي أو سابق لم ينتهِ): ليس فشلاً، نتخطى بهدوء
+            engine.log.info("تخطيت: يوجد تشغيل آخر قيد العمل")
+            if (scheduled) recordAuto(prefs, "info", "تخطيت الفحص لأن تشغيلاً آخر كان يعمل")
+            Result.success()
         } catch (e: StoppedByUser) {
-            engine.log.info("أوقف المستخدم التشغيل")
+            engine.log.info("توقف التشغيل: ${stopReasonText()}")
+            if (scheduled) { recordAuto(prefs, "warn", "توقف قبل أن يكتمل: ${stopReasonText()}"); noteFailure(prefs, backupMs, null) }
             Result.success(workDataOf("ok" to false, "error" to e.message))
         } catch (e: Throwable) {
             // Throwable وليس Exception فقط: حتى أخطاء مثل OutOfMemoryError تظهر رسالة بدل انهيار التطبيق
-            val msg = (e.message ?: "") .let { if (e is Exception && it.isNotEmpty()) it else "${e.javaClass.simpleName}: $it" }
+            val msg = (e.message ?: "").let { if (e is Exception && it.isNotEmpty()) it else "${e.javaClass.simpleName}: $it" }
             engine.log.error(msg + "\n" + com.modwahi.waarchiver.App.describe(e))
             if (action == "list" || action == "mirror") return@withContext Result.failure(workDataOf("error" to msg))
-            Notifier.failure(applicationContext, msg)
+            if (scheduled) { recordAuto(prefs, "error", "فشل: $msg"); noteFailure(prefs, backupMs, msg) }
+            else Notifier.failure(applicationContext, msg)
             Result.success(workDataOf("ok" to false, "error" to msg))
+        }
+    }
+
+    /** فشل تشغيل مجدول: انتظار متزايد، وإشعار مرة واحدة لكل نسخة */
+    private fun noteFailure(prefs: Prefs, backupMs: Long?, error: String?) {
+        val f = AutoPolicy.afterFailure(backupMs, prefs.failState, System.currentTimeMillis())
+        prefs.failState = f
+        if (error != null && AutoPolicy.shouldNotify(f)) {
+            Notifier.failure(applicationContext, error + if (f.count >= AutoPolicy.MAX_FAILS)
+                "\nتوقفت المحاولات التلقائية لهذه النسخة. شغّله يدوياً بعد إصلاح المشكلة." else
+                "\nسأعيد المحاولة تلقائياً بعد ${AutoPolicy.waitMs(f.count) / 3_600_000} ساعة.")
         }
     }
 

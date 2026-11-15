@@ -15,7 +15,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.OpenInNew
-import androidx.compose.material.icons.rounded.BatteryChargingFull
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.CloudDone
 import androidx.compose.material.icons.rounded.Error
@@ -86,7 +85,7 @@ fun HomeScreen(vm: AppViewModel, a: Actions, openHistory: () -> Unit, openChats:
         }
         if (vm.selectedCount == 0) TextButton(onClick = openChats) { Text("اختيار المحادثات") }
 
-        ScheduleCard(vm)
+        ScheduleCard(vm, a)
         LastRunCard(last, openHistory, a)
         DestinationCard(vm, a)
         Spacer(Modifier.size(8.dp))
@@ -122,7 +121,7 @@ private fun HeroCard(h: Hero) {
 }
 
 @Composable
-private fun ScheduleCard(vm: AppViewModel) {
+private fun ScheduleCard(vm: AppViewModel, a: Actions) {
     AppCard {
         Column(Modifier.padding(vertical = 4.dp)) {
             SettingRow(Icons.Rounded.Schedule, "التشغيل التلقائي",
@@ -130,10 +129,31 @@ private fun ScheduleCard(vm: AppViewModel) {
                 else "يفحص كل ساعة تقريباً، ويؤرشف مرة واحدة بعد كل نسخة احتياطية جديدة" +
                     (vm.nextCheckAt?.let { "\nالفحص القادم حوالي ${fmtTime(it)}" } ?: ""),
                 if (vm.scheduleEnabled) Tone.OK else Tone.WARN)
-            if (vm.scheduleEnabled) Row(Modifier.padding(start = 68.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (vm.scheduleEnabled) Row(Modifier.padding(start = 68.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (vm.requireCharging) Pill("على الشحن")
                 if (vm.requireWifi && vm.mode == Mode.DRIVE) Pill("واي فاي")
-                if (!vm.batteryExempt) Pill("تحسين البطارية مفعّل", Tone.WARN)
+            }
+            vm.lastAuto?.let { o ->
+                val tone = when (o.optString("tone")) { "ok" -> Tone.OK; "warn" -> Tone.WARN; "error" -> Tone.ERROR; else -> Tone.INFO }
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Column(Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
+                    Text("آخر فحص تلقائي: ${ago(o.optLong("time"))}", style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.size(4.dp))
+                    StatusLine(tone != Tone.ERROR, o.optString("text"), tone)
+                }
+            }
+            if (vm.scheduleEnabled && !vm.batteryExempt) {
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    StatusLine(false, "أندرويد قد يوقف التشغيل التلقائي: التطبيق غير مسموح له بالعمل في الخلفية", Tone.WARN)
+                    Text("١) اضغط «السماح» واختر «سماح».\n٢) في سامسونج أيضاً: «إعدادات التطبيق» ← البطارية ← «غير مقيّد».",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = { a.requestBatteryExemption() }) { Text("السماح") }
+                        OutlinedButton(onClick = { a.openAppSettings() }) { Text("إعدادات التطبيق") }
+                    }
+                }
             }
         }
     }
@@ -201,7 +221,5 @@ private fun DestinationCard(vm: AppViewModel, a: Actions) {
         } else {
             SettingRow(Icons.Rounded.PhoneAndroid, "حفظ محلي على التلفون", "في المجلد الذي اخترته")
         }
-        if (!vm.batteryExempt) SettingRow(Icons.Rounded.BatteryChargingFull, "اسمح بالعمل في الخلفية",
-            "حتى لا يوقف أندرويد التشغيل الليلي", Tone.WARN, onClick = { a.requestBatteryExemption() })
     }
 }

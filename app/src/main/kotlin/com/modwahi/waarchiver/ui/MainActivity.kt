@@ -37,6 +37,7 @@ interface Actions {
     fun openUrl(url: String)
     fun requestContacts()
     fun openDownloads()
+    fun openAppSettings()
 }
 
 class MainActivity : ComponentActivity(), Actions {
@@ -158,6 +159,12 @@ class MainActivity : ComponentActivity(), Actions {
     }
 
     override fun requestContacts() = contactsPermission.launch(Manifest.permission.READ_CONTACTS)
+
+    override fun openAppSettings() {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
+    }
 
     override fun openDownloads() {
         runCatching { startActivity(Intent(android.app.DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
