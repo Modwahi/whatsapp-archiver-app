@@ -102,6 +102,7 @@ fun Root(vm: AppViewModel, a: Actions) {
             },
             dismissButton = { TextButton(onClick = { vm.dismissCrash() }) { Text("إغلاق") } })
     }
+    vm.celebration?.let { run -> CelebrationSheet(vm, run) { vm.celebration = null } }
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         if (!vm.setupDone) SetupWizard(vm, a) else MainScaffold(vm, a)
     }
@@ -362,6 +363,9 @@ private fun duration(secs: Long): String = when {
 @Composable
 fun JobBanner(vm: AppViewModel) {
     val j = vm.job ?: return
+    val haptic = rememberHaptic(vm)
+    val animPct by androidx.compose.animation.core.animateFloatAsState(
+        (j.pct.coerceAtLeast(0)) / 100f, androidx.compose.animation.core.tween(600), label = "pct")
     val what = when (j.action) { "dry" -> "تجربة بدون رفع"; "list" -> "قراءة المحادثات"; "mirror" -> "تنزيل للقراءة"
         "scheduled" -> "أرشفة تلقائية"; else -> "أرشفة" }
     AppCard {
@@ -376,9 +380,9 @@ fun JobBanner(vm: AppViewModel) {
                 }
                 if (j.pct >= 0) Text("${j.pct}%", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
                 else CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                TextButton(onClick = { vm.stop() }) { Text("إيقاف") }
+                TextButton(onClick = { haptic(true); vm.stop() }) { Text("إيقاف") }
             }
-            if (j.pct >= 0) LinearProgressIndicator(progress = { j.pct / 100f }, modifier = Modifier.fillMaxWidth().height(8.dp),
+            if (j.pct >= 0) LinearProgressIndicator(progress = { animPct }, modifier = Modifier.fillMaxWidth().height(8.dp),
                 strokeCap = androidx.compose.ui.graphics.StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
             else LinearProgressIndicator(Modifier.fillMaxWidth())
             if (j.phase > 0) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {

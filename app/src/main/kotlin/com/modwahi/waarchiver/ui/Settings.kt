@@ -37,6 +37,8 @@ import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Key
 import androidx.compose.material.icons.rounded.Language
 import androidx.compose.material.icons.rounded.Notifications
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Vibration
 import androidx.compose.material.icons.rounded.Palette
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.PhoneAndroid
@@ -151,7 +153,13 @@ fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHist
         SectionTitle("الإشعارات والمظهر")
         AppCard {
             Column {
-                SettingRow(Icons.Rounded.Notifications, "إشعار عند نجاح الأرشفة", "الأخطاء والنسخة القديمة يُنبَّه لها دائماً") {
+                SettingRow(Icons.Rounded.MusicNote, "الأصوات", "نغمة عند البدء والاكتمال والخطأ (لا تعمل على الصامت)") {
+                    Switch(vm.soundsEnabled, { vm.updateSounds(it) })
+                }
+                SettingRow(Icons.Rounded.Vibration, "الاهتزاز", "اهتزاز خفيف مع الأزرار واختيار المحادثات") {
+                    Switch(vm.hapticsEnabled, { vm.updateHaptics(it) })
+                }
+                SettingRow(Icons.Rounded.Notifications, "إشعار اكتمال الأرشفة", "ملخص بعدد الرسائل والوسائط والحجم والمدة") {
                     Switch(vm.notifySuccess, { vm.updateNotifySuccess(it); if (it) a.requestNotifications() })
                 }
                 Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {

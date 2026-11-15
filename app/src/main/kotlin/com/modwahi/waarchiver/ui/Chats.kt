@@ -163,8 +163,10 @@ private fun EmptyChats(vm: AppViewModel) {
 private fun ChatRow(vm: AppViewModel, c: KnownChat, onEdit: () -> Unit) {
     val selected = vm.choices[c.jid]?.selected == true
     val name = vm.displayName(c)
+    val haptic = rememberHaptic(vm)
+    val toggle = { on: Boolean -> haptic(false); if (on) vm.tick(); vm.toggle(c.jid, on) }
     val prog = vm.progressByChat[c.jid]
-    Row(Modifier.fillMaxWidth().clickable { vm.toggle(c.jid, !selected) }.padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
+    Row(Modifier.fillMaxWidth().clickable { toggle(!selected) }.padding(start = 12.dp, end = 4.dp, top = 10.dp, bottom = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         ChatAvatar(name, c.isGroup, c.jid)
         Spacer(Modifier.width(12.dp))
@@ -181,7 +183,7 @@ private fun ChatRow(vm: AppViewModel, c: KnownChat, onEdit: () -> Unit) {
             }
         }
         if (selected) IconButton(onClick = onEdit) { Icon(Icons.Rounded.Edit, "تعديل", tint = MaterialTheme.colorScheme.primary) }
-        Checkbox(checked = selected, onCheckedChange = { vm.toggle(c.jid, it) })
+        Checkbox(checked = selected, onCheckedChange = { toggle(it) })
     }
 }
 

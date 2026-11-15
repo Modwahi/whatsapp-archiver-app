@@ -108,7 +108,7 @@ class Prefs(context: Context) {
         set(v) = put { putInt("theme", v) }
 
     var notifySuccess: Boolean
-        get() = sp.getBoolean("notify_success", false)
+        get() = sp.getBoolean("notify_success", true)
         set(v) = put { putBoolean("notify_success", v) }
 
     /** استخدام أسماء جهات الاتصال في التلفون لأسماء المرسلين (مثل contacts.json في الأداة) */
@@ -137,6 +137,14 @@ class Prefs(context: Context) {
     var bgDeniedNotifiedDay: String?
         get() = str("bg_denied_day")
         set(v) = put { putString("bg_denied_day", v) }
+
+    var soundsEnabled: Boolean
+        get() = sp.getBoolean("sounds", true)
+        set(v) = put { putBoolean("sounds", v) }
+
+    var hapticsEnabled: Boolean
+        get() = sp.getBoolean("haptics", true)
+        set(v) = put { putBoolean("haptics", v) }
 
     var lastUpdateCheck: Long
         get() = sp.getLong("update_check", 0)

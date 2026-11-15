@@ -133,6 +133,20 @@ class ScreenshotTest {
         shot("13_update")
     }
 
+    @Test fun celebration() {
+        seed(true)
+        val vm = AppViewModel(ApplicationProvider.getApplicationContext())
+        val run = JSONObject(com.modwahi.waarchiver.data.Prefs(ApplicationProvider.getApplicationContext()).lastRun!!)
+            .put("bytes", 48_300_000L).put("duration", 222_000L)
+        vm.celebration = run
+        rule.mainClock.autoAdvance = true
+        rule.setContent {
+            AppTheme(2) { CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { Root(vm, actions) } }
+        }
+        rule.mainClock.advanceTimeBy(2500)
+        shot("14_celebration")
+    }
+
     @Test fun dark() {
         seed(true)
         render(2)

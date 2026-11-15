@@ -214,8 +214,7 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                         }
                         !summary.ok -> Notifier.failure(applicationContext, firstError)
                         action == "dry" -> Notifier.info(applicationContext, "اكتملت التجربة", "الناتج في $exported")
-                        prefs.notifySuccess -> Notifier.info(applicationContext, "تمت الأرشفة ✓",
-                            "رسائل ${summary.chats.sumOf { it.messages }} و وسائط ${summary.chats.sumOf { it.media }} في ${summary.chats.size} محادثة")
+                        prefs.notifySuccess -> notifyDone(summary, prefs)
                     }
                     if (summary.warnings.isNotEmpty()) notifyStaleOnce(engine, summary.warnings.first())
                     Result.success(workDataOf("ok" to summary.ok, "exported" to exported))
@@ -239,6 +238,21 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
             else Notifier.failure(applicationContext, msg)
             Result.success(workDataOf("ok" to false, "error" to msg))
         }
+    }
+
+    /** إشعار الاكتمال: «تمت أرشفة 87 رسالة ✓» + الوسائط والحجم والمدة + تفاصيل المحادثات */
+    private fun notifyDone(s: com.modwahi.waarchiver.core.Summary, prefs: Prefs) {
+        val run = prefs.lastRun?.let { org.json.JSONObject(it) }
+        val msgs = s.chats.sumOf { it.messages }
+        val media = s.chats.sumOf { it.media }
+        val mb = (run?.optLong("bytes") ?: 0L) / 1048576.0
+        val secs = (run?.optLong("duration") ?: 0L) / 1000
+        val dur = if (secs < 60) "$secs ث" else "${secs / 60} د ${secs % 60} ث"
+        val title = if (msgs == 0) "لا رسائل جديدة — الأرشيف محدّث ✓" else "تمت أرشفة $msgs رسالة ✓"
+        val summary = "وسائط $media · ${String.format(java.util.Locale.ROOT, "%.1f", mb)} ميغابايت · ${s.chats.size} محادثة · $dur"
+        val details = s.chats.filter { it.messages > 0 || it.media > 0 }.sortedByDescending { it.messages }.take(8)
+            .joinToString("\n") { "• ${it.name}: ${it.messages} رسالة، ${it.media} وسيط" }
+        Notifier.done(applicationContext, title, summary, details)
     }
 
     /** فشل تشغيل مجدول: انتظار متزايد، وإشعار مرة واحدة لكل نسخة */

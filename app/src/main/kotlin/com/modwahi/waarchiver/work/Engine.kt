@@ -212,10 +212,12 @@ class Engine(private val context: Context) {
                 override fun uploadDir(localDir: File, relDir: String) {}
             }
         } else MirroringUploader(uploader(), mirror)
+        val startedAt = System.currentTimeMillis()
+        var uploaded = 0L
         val summary = try {
             runArchive(cfg, paths, key(), source(), up, log, AndroidSql, contacts(),
                 dryRun = dryRun, scheduled = scheduled, dryDir = if (dryRun) dryDir else null,
-                onProgress = progress, onChats = ::saveKnown)
+                onProgress = { p -> if (p.phase == 3) uploaded = p.bytesDone; progress(p) }, onChats = ::saveKnown)
         } finally {
             (up as? LazyUploader)?.closeIfOpen()
             ((up as? MirroringUploader)?.inner as? LazyUploader)?.closeIfOpen()
@@ -226,7 +228,7 @@ class Engine(private val context: Context) {
             exported = exportToDownloads(dryDir, "أرشيف واتساب - تجربة/$stamp")
             dryDir.deleteRecursively()
         }
-        if (summary != null) saveRun(summary, exported, scheduled)
+        if (summary != null) saveRun(summary, exported, scheduled, uploaded, System.currentTimeMillis() - startedAt)
         return summary to exported
     }
 
@@ -266,9 +268,11 @@ class Engine(private val context: Context) {
         return fetched
     }
 
-    private fun saveRun(s: Summary, exported: String?, scheduled: Boolean) {
+    private fun saveRun(s: Summary, exported: String?, scheduled: Boolean, bytes: Long, durationMs: Long) {
         val o = JSONObject()
             .put("time", System.currentTimeMillis())
+            .put("bytes", bytes)
+            .put("duration", durationMs)
             .put("ok", s.ok)
             .put("dry", s.dryRun)
             .put("scheduled", scheduled)
