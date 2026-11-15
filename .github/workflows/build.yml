@@ -55,9 +55,13 @@ jobs:
           KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
         run: |
           if [ -z "$KEYSTORE_B64" ] || [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
-            echo "::error::أسرار التوقيع غير موجودة (SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD)."
-            exit 1
+            MSG="أسرار التوقيع غير موجودة (SIGNING_KEYSTORE_BASE64, SIGNING_STORE_PASSWORD, SIGNING_KEY_ALIAS, SIGNING_KEY_PASSWORD) — لن يُنشر إصدار"
+            if [[ "$GITHUB_REF" == refs/tags/v* ]]; then echo "::error::$MSG"; exit 1; fi
+            echo "::warning::$MSG"
+            echo "SIGNED=false" >> "$GITHUB_ENV"
+            exit 0
           fi
+          echo "SIGNED=true" >> "$GITHUB_ENV"
           echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
           {
             echo "SIGNING_STORE_FILE=$RUNNER_TEMP/release.jks"
@@ -99,7 +103,7 @@ jobs:
 
       - name: Already released?
         id: exists
-        if: steps.ver.outputs.release == 'true'
+        if: steps.ver.outputs.release == 'true' && env.SIGNED == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -111,7 +115,7 @@ jobs:
           fi
 
       - name: GitHub Release
-        if: steps.ver.outputs.release == 'true' && steps.exists.outputs.skip == 'false'
+        if: steps.ver.outputs.release == 'true' && env.SIGNED == 'true' && steps.exists.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ steps.ver.outputs.version }}

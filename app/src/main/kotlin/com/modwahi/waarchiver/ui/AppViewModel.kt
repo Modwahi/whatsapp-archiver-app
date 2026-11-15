@@ -72,6 +72,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var phoneContacts by mutableStateOf<Map<String, String>>(emptyMap()); private set
     /** المحادثات المتوفرة للقراءة داخل التطبيق */
     var readable by mutableStateOf<List<com.modwahi.waarchiver.work.Mirror.ChatDir>>(emptyList()); private set
+    // التحديثات
+    var update by mutableStateOf<com.modwahi.waarchiver.io.Updates.Release?>(null); private set
+    /** null لا شيء، "checking"، "downloading"، "installing" */
+    var updateState by mutableStateOf<String?>(null); private set
+    var updatePct by mutableStateOf(0f); private set
+    val currentVersion: String = com.modwahi.waarchiver.BuildConfig.VERSION_NAME
     var listError by mutableStateOf<String?>(null)
     var message by mutableStateOf<String?>(null)
     var crash by mutableStateOf(App.crashFile(app).takeIf { it.exists() }?.readText())
@@ -91,6 +97,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         reload()
+        if (System.currentTimeMillis() - prefs.lastUpdateCheck > 6 * 3_600_000L) checkUpdates(manual = false)
         viewModelScope.launch {
             wm.getWorkInfosForUniqueWorkFlow(ArchiveWorker.MANUAL).collectLatest { onManual(it) }
         }
@@ -143,9 +150,65 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** يفحص صفحة Releases. manual: يُظهر رسالة حتى لو لا يوجد جديد. */
+    fun checkUpdates(manual: Boolean) {
+        if (updateState != null) return
+        updateState = "checking"
+        viewModelScope.launch {
+            val r = withContext(Dispatchers.IO) { runCatching { com.modwahi.waarchiver.io.Updates.latest() } }
+            updateState = null
+            prefs.lastUpdateCheck = System.currentTimeMillis()
+            r.onSuccess { rel ->
+                update = rel?.takeIf { com.modwahi.waarchiver.io.Updates.newer(it.version, currentVersion) }
+                if (manual && update == null) message = "لديك أحدث إصدار ($currentVersion) ✓"
+            }.onFailure { if (manual) message = it.message ?: "تعذّر فحص التحديثات" }
+        }
+    }
+
+    /** ينزّل التحديث ويتحقق من مفتاح التوقيع ثم يفتح التثبيت */
+    fun installUpdate(a: Actions) {
+        val rel = update ?: return
+        val app = getApplication<Application>()
+        if (!com.modwahi.waarchiver.io.Updates.canInstall(app)) {
+            message = "اسمح لـ «أرشيف واتساب» بتثبيت التحديثات: فعّل «السماح من هذا المصدر» ثم ارجع واضغط «تحديث الآن» مرة أخرى."
+            a.openInstallPermission()
+            return
+        }
+        updateState = "downloading"
+        updatePct = 0f
+        viewModelScope.launch {
+            val res = withContext(Dispatchers.IO) {
+                runCatching {
+                    val f = com.modwahi.waarchiver.io.Updates.download(app, rel) { p -> updatePct = p.toFloat() }
+                    val mine = com.modwahi.waarchiver.io.Updates.installedCert(app)
+                    val theirs = com.modwahi.waarchiver.io.Updates.fileCert(app, f)
+                    if (mine != null && theirs != null && mine != theirs) {
+                        throw IllegalStateException(
+                            "هذا الإصدار موقّع بمفتاح غير مفتاح النسخة المثبّتة، فلن يقبله أندرويد كتحديث.\n" +
+                                "المثبّت: $mine\nالجديد: $theirs\n" +
+                                "الحل: احذف التطبيق ثم ثبّت الإصدار الجديد من صفحة Releases (ستحتاج لإعادة الإعداد).")
+                    }
+                    f
+                }
+            }
+            res.onSuccess { f ->
+                updateState = "installing"
+                withContext(Dispatchers.IO) { runCatching { com.modwahi.waarchiver.io.Updates.install(app, f) } }
+                    .onFailure { message = "تعذّر بدء التثبيت: ${it.message}" }
+                updateState = null
+            }.onFailure {
+                updateState = null
+                message = it.message ?: "تعذّر تنزيل التحديث"
+            }
+        }
+    }
+
     /** للقطات الشاشة في الاختبارات فقط */
     @androidx.annotation.VisibleForTesting
     fun previewJob(j: Job?) { job = j }
+
+    @androidx.annotation.VisibleForTesting
+    fun previewUpdate(r: com.modwahi.waarchiver.io.Updates.Release?) { update = r }
 
     fun dismissCrash() {
         App.crashFile(getApplication()).delete()

@@ -173,7 +173,12 @@ fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHist
             Column {
                 SettingRow(Icons.Rounded.History, "سجل التشغيلات", "آخر ${vm.history.size} تشغيلاً بالتفاصيل", onClick = openHistory, trailing = chevron)
                 SettingRow(Icons.Rounded.Description, "تصدير السجل", "ملف نصي للمطوّر — لا يحتوي المفتاح أبداً", onClick = { a.exportLogs() })
-                SettingRow(Icons.Rounded.Info, "الإصدار", BuildConfig.VERSION_NAME)
+                SettingRow(Icons.Rounded.Info, "الإصدار والتحديثات",
+                    "الإصدار الحالي ${BuildConfig.VERSION_NAME}" + when {
+                        vm.updateState == "checking" -> " — جارٍ الفحص…"
+                        vm.update != null -> " — متوفر ${vm.update!!.version}، التحديث من الرئيسية"
+                        else -> " — اضغط لفحص التحديثات"
+                    }, if (vm.update != null) Tone.OK else Tone.INFO, onClick = { vm.checkUpdates(manual = true) })
             }
         }
         Spacer(Modifier.size(16.dp))

@@ -38,6 +38,7 @@ interface Actions {
     fun requestContacts()
     fun openDownloads()
     fun openAppSettings()
+    fun openInstallPermission()
 }
 
 class MainActivity : ComponentActivity(), Actions {
@@ -163,6 +164,12 @@ class MainActivity : ComponentActivity(), Actions {
     override fun openAppSettings() {
         runCatching {
             startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
+    }
+
+    override fun openInstallPermission() {
+        runCatching {
+            startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:$packageName")))
         }
     }
 

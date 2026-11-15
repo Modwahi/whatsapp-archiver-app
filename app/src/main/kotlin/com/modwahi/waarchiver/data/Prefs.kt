@@ -138,6 +138,10 @@ class Prefs(context: Context) {
         get() = str("bg_denied_day")
         set(v) = put { putString("bg_denied_day", v) }
 
+    var lastUpdateCheck: Long
+        get() = sp.getLong("update_check", 0)
+        set(v) = put { putLong("update_check", v) }
+
     var staleNotifiedDay: String?
         get() = str("stale_notified")
         set(v) = put { putString("stale_notified", v) }
