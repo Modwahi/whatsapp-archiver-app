@@ -15,7 +15,10 @@ val signingProps = Properties().apply {
 fun signingValue(env: String, prop: String): String? = System.getenv(env) ?: signingProps.getProperty(prop)
 val releaseStore = signingValue("SIGNING_STORE_FILE", "storeFile")
 
-val tagVersion = (System.getenv("GITHUB_REF_NAME") ?: "").removePrefix("v").takeIf { Regex("\\d+\\.\\d+\\.\\d+").matches(it) }
+// رقم الإصدار: من الـ tag (v1.3.0) إن وُجد، وإلا من version.txt في جذر المستودع
+val semver = Regex("\\d+\\.\\d+\\.\\d+")
+val tagVersion = (System.getenv("GITHUB_REF_NAME") ?: "").removePrefix("v").takeIf { semver.matches(it) }
+    ?: rootProject.file("version.txt").takeIf { it.exists() }?.readText()?.trim()?.takeIf { semver.matches(it) }
 
 android {
     namespace = "com.modwahi.waarchiver"
