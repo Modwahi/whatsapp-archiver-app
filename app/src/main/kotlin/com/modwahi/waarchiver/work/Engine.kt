@@ -74,12 +74,50 @@ class Engine(private val context: Context) {
                 if (f.trashed) throw UploadError("مجلد «${f.name}» في سلة مهملات Google Drive. استرجعه ثم أعد التشغيل.")
                 return id
             }
-            log.warning("مجلد الدرايف المحفوظ لم يعد موجوداً؛ سأنشئ مجلداً جديداً")
+            log.warning("مجلد الدرايف المحفوظ لم يعد موجوداً")
         }
+        // لا يوجد مجلد محفوظ (مثلاً بعد إعادة تثبيت التطبيق): نواصل في مجلد الأرشيف السابق إن وُجد
+        runCatching { drive.archiveRoots(DRIVE_FOLDER_NAME, com.modwahi.waarchiver.core.LOG_DIR_REMOTE) }.getOrNull()
+            ?.firstOrNull()?.let { prev ->
+                prefs.driveFolderId = prev.id
+                log.info("وجدت مجلد الأرشيف السابق «${prev.name}» وسأواصل فيه")
+                return prev.id
+            }
         val id = drive.createFolder(DRIVE_FOLDER_NAME, null)
         prefs.driveFolderId = id
         log.info("أنشأت مجلد «$DRIVE_FOLDER_NAME» في Google Drive")
         return id
+    }
+
+    /** مجلدات الأرشيف في الدرايف التي يستطيع التطبيق الكتابة فيها */
+    fun archiveRoots(): List<DriveClient.ArchiveRoot> =
+        driveClient().archiveRoots(DRIVE_FOLDER_NAME, com.modwahi.waarchiver.core.LOG_DIR_REMOTE)
+
+    /**
+     * يستخدم مجلداً آخر في الدرايف (من القائمة أو برابطه). يُعاد حساب التقدّم: التشغيل التالي يسحب آخر
+     * «أيام السحب أول مرة» ويدمجها مع ما في المجلد بدون تكرار (حسب رقم كل رسالة).
+     */
+    fun useDriveFolder(idOrLink: String): String {
+        val id = Regex("folders/([A-Za-z0-9_-]+)").find(idOrLink)?.groupValues?.get(1)
+            ?: idOrLink.trim().takeIf { Regex("[A-Za-z0-9_-]{10,}").matches(it) }
+            ?: throw RunError("هذا ليس رابط مجلد في Google Drive")
+        val f = driveClient().get(id) ?: throw RunError(
+            "التطبيق لا يستطيع الوصول لهذا المجلد. صلاحية التطبيق (drive.file) تسمح فقط بالمجلدات التي أنشأها التطبيق نفسه — " +
+                "مجلد أداة Termux مثلاً لا يمكن الكتابة فيه.")
+        if (f.mime != DriveClient.FOLDER_MIME) throw RunError("هذا الرابط لملف وليس لمجلد")
+        if (f.trashed) throw RunError("هذا المجلد في سلة المهملات")
+        if (id != prefs.driveFolderId) {
+            prefs.driveFolderId = id
+            resetProgress()
+            log.info("مجلد الأرشيف الآن: «${f.name}»")
+        }
+        return f.name
+    }
+
+    /** ينسى آخر رسالة أُرشفت لكل محادثة؛ التشغيل التالي يكمل بالدمج مع ما في الوجهة بدون تكرار */
+    fun resetProgress() {
+        paths.state.delete()
+        prefs.failState = null
     }
 
     private class LazyUploader(private val make: () -> Uploader) : Uploader {

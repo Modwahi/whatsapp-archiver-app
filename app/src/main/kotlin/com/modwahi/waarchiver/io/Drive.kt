@@ -153,6 +153,51 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
         return out
     }
 
+    /** مجلد أرشيف وجده التطبيق في الدرايف */
+    data class ArchiveRoot(val id: String, val name: String, val createdMs: Long, val lastRunMs: Long, val chats: Int)
+
+    private fun query(q: String, fields: String): List<JSONObject> {
+        val out = ArrayList<JSONObject>()
+        var pageToken: String? = null
+        do {
+            val url = "$API/files".toHttpUrl().newBuilder()
+                .addQueryParameter("q", q).addQueryParameter("fields", "nextPageToken,files($fields)")
+                .addQueryParameter("pageSize", "200").addQueryParameter("spaces", "drive")
+                .apply { pageToken?.let { addQueryParameter("pageToken", it) } }.build()
+            pageToken = call({ it.url(url) }) { r ->
+                val o = JSONObject(r.body.string())
+                val a = o.optJSONArray("files") ?: JSONArray()
+                for (k in 0 until a.length()) out.add(a.getJSONObject(k))
+                o.optString("nextPageToken").takeIf { it.isNotEmpty() }
+            }
+        } while (pageToken != null)
+        return out
+    }
+
+    private fun isoMs(s: String?): Long = runCatching { java.time.Instant.parse(s).toEpochMilli() }.getOrDefault(0L)
+
+    /**
+     * يبحث عن مجلدات الأرشيف التي يستطيع التطبيق الوصول إليها (أنشأها هو، حتى لو نُقلت أو غُيّر اسمها):
+     * المجلد الذي فيه «_سجل التشغيل»، أو المجلد باسم التطبيق الافتراضي. الأحدث تشغيلاً أولاً.
+     */
+    fun archiveRoots(defaultName: String, logDirName: String): List<ArchiveRoot> {
+        val folder = "mimeType = '$FOLDER_MIME' and trashed = false"
+        val lastRun = HashMap<String, Long>()
+        for (log in query("name = '${q(logDirName)}' and $folder", "id,parents,modifiedTime")) {
+            val p = log.optJSONArray("parents")?.optString(0) ?: continue
+            lastRun[p] = maxOf(lastRun[p] ?: 0L, isoMs(log.optString("modifiedTime")))
+        }
+        for (f in query("name = '${q(defaultName)}' and $folder", "id")) lastRun.putIfAbsent(f.getString("id"), 0L)
+        return lastRun.mapNotNull { (id, run) ->
+            runCatching {
+                val meta = call({ it.url("$API/files/$id?fields=id,name,createdTime,trashed") }) { JSONObject(it.body.string()) }
+                if (meta.optBoolean("trashed")) return@runCatching null
+                val chats = listChildren(id).count { it.mime == FOLDER_MIME && it.name != logDirName }
+                ArchiveRoot(id, meta.optString("name"), isoMs(meta.optString("createdTime")), run, chats)
+            }.getOrNull()
+        }.sortedWith(compareByDescending<ArchiveRoot> { it.lastRunMs }.thenBy { it.createdMs })
+    }
+
     fun createFolder(name: String, parentId: String?): String {
         val meta = JSONObject().put("name", name).put("mimeType", FOLDER_MIME)
         if (parentId != null) meta.put("parents", JSONArray().put(parentId))

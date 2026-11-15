@@ -73,8 +73,9 @@ import androidx.compose.ui.unit.dp
 import com.modwahi.waarchiver.BuildConfig
 import com.modwahi.waarchiver.data.DRIVE_FOLDER_NAME
 import com.modwahi.waarchiver.data.Mode
+import kotlinx.coroutines.launch
 
-private enum class Dialog { NONE, KEY, DAYS, MEDIA, TZ, ME, DEST, CC }
+private enum class Dialog { NONE, KEY, DAYS, MEDIA, TZ, ME, DEST, CC, FOLDER }
 
 @Composable
 fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHistory: () -> Unit) {
@@ -102,6 +103,9 @@ fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHist
                 SettingRow(if (vm.mode == Mode.DRIVE) Icons.Rounded.Cloud else Icons.Rounded.PhoneAndroid, "وجهة الحفظ",
                     if (vm.mode == Mode.DRIVE) "Google Drive — ${vm.account ?: "لم تسجّل الدخول"}" else "مجلد محلي على التلفون",
                     onClick = { dialog = Dialog.DEST }, trailing = chevron)
+                if (vm.mode == Mode.DRIVE && vm.account != null) SettingRow(Icons.Rounded.FolderOpen, "مجلد الأرشيف في Drive",
+                    "اختر مجلدك السابق (مثلاً بعد إعادة تثبيت التطبيق) ليواصل فيه بدون تكرار",
+                    onClick = { vm.loadArchiveFolders(); dialog = Dialog.FOLDER }, trailing = chevron)
                 if (vm.mode == Mode.DRIVE && vm.driveFolderId != null) SettingRow(Icons.AutoMirrored.Rounded.OpenInNew,
                     "فتح مجلد الأرشيف", "«$DRIVE_FOLDER_NAME» — يمكنك نقله لأي مكان في الدرايف وسيستمر التطبيق بالكتابة فيه",
                     onClick = { a.openUrl("https://drive.google.com/drive/folders/${vm.driveFolderId}") })
@@ -198,8 +202,65 @@ fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHist
         Dialog.DEST -> AlertDialog(onDismissRequest = close, confirmButton = { TextButton(onClick = close) { Text("تم") } },
             title = { Text("وجهة الحفظ") },
             text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) { DestinationPicker(vm, a) } })
+        Dialog.FOLDER -> FolderDialog(vm, close)
         Dialog.CC, Dialog.NONE -> {}
     }
+}
+
+@Composable
+private fun FolderDialog(vm: AppViewModel, onClose: () -> Unit) {
+    var link by remember { mutableStateOf("") }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    fun choose(v: String) {
+        busy = true
+        scope.launch {
+            error = vm.chooseArchiveFolder(v)
+            busy = false
+            if (error == null) onClose()
+        }
+    }
+    AlertDialog(onDismissRequest = onClose, title = { Text("مجلد الأرشيف في Drive") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("مجلدات الأرشيف التي أنشأها التطبيق (حتى لو نقلتها أو غيّرت اسمها):", style = MaterialTheme.typography.bodyMedium)
+                val list = vm.archiveFolders
+                when {
+                    list == null -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp)); Text("جارٍ البحث في Drive…")
+                    }
+                    list.isEmpty() -> Text(vm.archiveFoldersError ?: "لم أجد مجلدات أرشيف سابقة.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    else -> list.forEach { f ->
+                        val current = f.id == vm.driveFolderId
+                        AppCard {
+                            Row(Modifier.clickable(enabled = !busy && !current) { choose(f.id) }.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically) {
+                                RadioButton(selected = current, onClick = { if (!current) choose(f.id) }, enabled = !busy)
+                                Column(Modifier.weight(1f)) {
+                                    Text(f.name + if (current) "  (الحالي)" else "", style = MaterialTheme.typography.bodyLarge)
+                                    Text("${f.chats} محادثة" +
+                                        (if (f.lastRunMs > 0) " · آخر تشغيل ${fmtDate(f.lastRunMs)}" else "") +
+                                        " · أُنشئ ${fmtDay(f.createdMs)}",
+                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+                        }
+                    }
+                }
+                HorizontalDivider(Modifier.padding(vertical = 4.dp))
+                OutlinedTextField(value = link, onValueChange = { link = it; error = null }, singleLine = true,
+                    label = { Text("أو الصق رابط المجلد من Drive") }, modifier = Modifier.fillMaxWidth())
+                error?.let { StatusLine(false, it) }
+                Text("عند التغيير يكمل التطبيق آخر ${vm.firstRunDays} يوم في المجلد المختار ويدمجها مع الموجود بدون تكرار. " +
+                    "يمكنك زيادة «أيام السحب أول مرة» قبل التشغيل إن كان الانقطاع أطول.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        },
+        confirmButton = { TextButton(enabled = !busy && link.isNotBlank(), onClick = { choose(link) }) { Text("استخدم الرابط") } },
+        dismissButton = { TextButton(onClick = onClose) { Text("إغلاق") } })
 }
 
 @Composable
