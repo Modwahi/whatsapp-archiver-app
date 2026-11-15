@@ -150,6 +150,30 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    // مجلدات الأرشيف في الدرايف
+    var archiveFolders by mutableStateOf<List<com.modwahi.waarchiver.io.DriveClient.ArchiveRoot>?>(null); private set
+    var archiveFoldersError by mutableStateOf<String?>(null); private set
+
+    fun loadArchiveFolders() {
+        archiveFolders = null
+        archiveFoldersError = null
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { runCatching { engine.archiveRoots() } }
+                .onSuccess { archiveFolders = it }
+                .onFailure { archiveFoldersError = it.message ?: "تعذّر البحث في Google Drive"; archiveFolders = emptyList() }
+        }
+    }
+
+    /** يواصل الأرشفة في مجلد آخر (من القائمة أو برابط). يرجع رسالة خطأ أو null. */
+    suspend fun chooseArchiveFolder(idOrLink: String): String? = withContext(Dispatchers.IO) {
+        runCatching { engine.useDriveFolder(idOrLink) }.fold({ name ->
+            driveFolderId = prefs.driveFolderId
+            reload()
+            message = "سيواصل التطبيق الأرشفة في «$name».\nفي التشغيل القادم يكمل آخر ${prefs.firstRunDays} يوم ويدمجها مع الموجود بدون تكرار."
+            null
+        }, { it.message ?: "تعذّر استخدام هذا المجلد" })
+    }
+
     /** يفحص صفحة Releases. manual: يُظهر رسالة حتى لو لا يوجد جديد. */
     fun checkUpdates(manual: Boolean) {
         if (updateState != null) return
