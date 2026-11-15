@@ -50,6 +50,7 @@ class ScreenshotTest {
         override fun openUrl(url: String) {}
         override fun requestContacts() {}
         override fun openDownloads() {}
+        override fun openAppSettings() {}
     }
 
     private fun seed(setupDone: Boolean) {
@@ -78,6 +79,8 @@ class ScreenshotTest {
             .put("chats", JSONArray().put(JSONObject().put("name", "طلبات التحويل_ الشركة").put("messages", 7).put("media", 2).put("missing", 1).put("large", 0).put("recovered", 0).put("error", JSONObject.NULL))
                 .put(JSONObject().put("name", "العميل سعيد").put("messages", 2).put("media", 0).put("missing", 0).put("large", 0).put("recovered", 0).put("error", JSONObject.NULL)))
         p.lastRun = run.toString()
+        p.lastAuto = JSONObject().put("time", System.currentTimeMillis() - 40 * 60_000).put("tone", "info")
+            .put("text", "لا توجد نسخة احتياطية جديدة منذ آخر أرشفة")
         p.history = listOf(run, JSONObject(run.toString()).put("time", run.getLong("time") - 86400_000).put("ok", false)
             .put("errors", JSONArray().put("انقطع الاتصال بـ Google Drive")))
     }

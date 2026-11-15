@@ -51,6 +51,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var choices by mutableStateOf(prefs.choices.associateBy { it.jid }); private set
     var contacts by mutableStateOf(prefs.contacts); private set
     var lastRun by mutableStateOf(prefs.lastRun?.let { JSONObject(it) }); private set
+    var lastAuto by mutableStateOf(prefs.lastAuto); private set
     var history by mutableStateOf(prefs.history); private set
     var progressByChat by mutableStateOf<Map<String, ChatProgress>>(emptyMap()); private set
     var backupAge by mutableStateOf<Double?>(null); private set
@@ -115,6 +116,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         known = prefs.knownChats
         knownAt = prefs.knownChatsAt
         lastRun = prefs.lastRun?.let { JSONObject(it) }
+        lastAuto = prefs.lastAuto
         history = prefs.history
         driveFolderId = prefs.driveFolderId
         batteryExempt = getApplication<Application>().getSystemService(PowerManager::class.java)

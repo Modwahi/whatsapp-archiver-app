@@ -17,7 +17,10 @@ const val LOOKBACK_FLOOR_S = 3 * 86400L       // لا نرجع أكثر من ٣ 
 const val MAX_PENDING_ATTEMPTS = 7
 const val MIN_BACKUP_AGE_S = 10 * 60.0        // لا نقرأ نسخة كُتبت للتو (قد يكون واتساب ما زال يكتبها)
 
-class RunError(message: String) : Exception(message)
+open class RunError(message: String) : Exception(message)
+
+/** تشغيل آخر يعمل الآن (ليس فشلاً: يُتخطى بهدوء) */
+class BusyError : RunError("يوجد تشغيل آخر قيد العمل الآن")
 
 data class ChatSpec(val jid: String, val name: String = "")
 
@@ -93,11 +96,11 @@ object RunLock {
     fun <T> with(path: File, block: () -> T): T {
         path.parentFile?.mkdirs()
         val key = path.canonicalPath
-        if (!held.add(key)) throw RunError("يوجد تشغيل آخر قيد العمل الآن")
+        if (!held.add(key)) throw BusyError()
         try {
             RandomAccessFile(path, "rw").use { raf ->
                 val lock: FileLock = try { raf.channel.tryLock() } catch (e: Exception) { null }
-                    ?: throw RunError("يوجد تشغيل آخر قيد العمل الآن")
+                    ?: throw BusyError()
                 try {
                     return block()
                 } finally {

@@ -17,6 +17,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.Error
 import androidx.compose.material.icons.rounded.Groups
+import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -87,7 +88,7 @@ fun toneColors(t: Tone): Pair<Color, Color> {
 fun StatusLine(ok: Boolean, text: String, tone: Tone = if (ok) Tone.OK else Tone.ERROR) {
     val (fg, _) = toneColors(tone)
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Icon(when (tone) { Tone.OK -> Icons.Rounded.CheckCircle; Tone.WARN -> Icons.Rounded.Warning; else -> Icons.Rounded.Error },
+        Icon(when (tone) { Tone.OK -> Icons.Rounded.CheckCircle; Tone.WARN -> Icons.Rounded.Warning; Tone.INFO -> Icons.Rounded.Info; else -> Icons.Rounded.Error },
             null, tint = fg, modifier = Modifier.size(20.dp))
         Spacer(Modifier.width(8.dp))
         Text(text, color = if (tone == Tone.ERROR) fg else MaterialTheme.colorScheme.onSurface, style = MaterialTheme.typography.bodyMedium)

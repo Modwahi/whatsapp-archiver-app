@@ -123,6 +123,8 @@ fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHist
                 SettingRow(Icons.Rounded.BatteryChargingFull, "العمل في الخلفية",
                     if (vm.batteryExempt) "مسموح ✓ (التطبيق مستثنى من تحسين البطارية)" else "غير مسموح — اضغط للسماح حتى لا يتوقف التشغيل الليلي",
                     if (vm.batteryExempt) Tone.OK else Tone.WARN, onClick = { a.requestBatteryExemption() })
+                SettingRow(Icons.Rounded.PhoneAndroid, "إعدادات البطارية للتطبيق",
+                    "في سامسونج: البطارية ← «غير مقيّد»، حتى لا يضع النظام التطبيق في وضع السكون", onClick = { a.openAppSettings() })
             }
         }
 

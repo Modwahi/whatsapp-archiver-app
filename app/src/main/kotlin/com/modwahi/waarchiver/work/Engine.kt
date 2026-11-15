@@ -108,6 +108,19 @@ class Engine(private val context: Context) {
         b.open().use { Crypt15.verifyKey(it, key) }
     }
 
+    /**
+     * فحص سريع قبل التشغيل المجدول (بدون فك): نفس شروط الأداة.
+     * يرجع سبب التخطي، أو null إن كان هناك عمل.
+     */
+    fun scheduledSkipReason(): String? {
+        val b = runCatching { source().backup() }.getOrNull() ?: return null // عدم وجود النسخة يعالجه التشغيل نفسه
+        val last = com.modwahi.waarchiver.core.State(paths.state).lastBackupMtime
+        if (b.mtime <= last) return "لا توجد نسخة احتياطية جديدة منذ آخر أرشفة"
+        if (System.currentTimeMillis() / 1000.0 - b.mtime < com.modwahi.waarchiver.core.MIN_BACKUP_AGE_S)
+            return "النسخة الاحتياطية كُتبت للتو — سأحاول بعد قليل"
+        return null
+    }
+
     fun backupMtimeMs(): Long? = runCatching { source().backup()?.mtime?.let { (it * 1000).toLong() } }.getOrNull()
 
     fun backupAgeHours(): Double? = backupMtimeMs()?.let { (System.currentTimeMillis() - it) / 3_600_000.0 }
