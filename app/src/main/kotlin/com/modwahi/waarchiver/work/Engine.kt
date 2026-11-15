@@ -120,7 +120,11 @@ class Engine(private val context: Context) {
         prefs.failState = null
     }
 
-    private class LazyUploader(private val make: () -> Uploader) : Uploader {
+    private class LazyUploader(private val make: () -> Uploader) : Uploader, com.modwahi.waarchiver.io.RemoteSizes {
+        override fun remoteSize(relDir: String, name: String): Long? = when (val i = inner) {
+            is com.modwahi.waarchiver.io.RemoteSizes -> i.remoteSize(relDir, name)
+            else -> i.readFile(relDir, name)?.size?.toLong()
+        }
         // يُجهَّز عند أول استخدام، حتى يظهر خطأ الاتصال في ملخص المحادثة كما في الأداة
         private val holder = lazy { make() }
         val inner by holder
