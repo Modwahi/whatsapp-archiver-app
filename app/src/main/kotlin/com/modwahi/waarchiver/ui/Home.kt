@@ -37,6 +37,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -48,6 +50,7 @@ private data class Hero(val tone: Tone, val icon: ImageVector, val title: String
 
 @Composable
 fun HomeScreen(vm: AppViewModel, a: Actions, openHistory: () -> Unit, openChats: () -> Unit) {
+    val haptic = rememberHaptic(vm)
     val last = vm.lastRun
     val age = vm.backupAge
     val lastOk = vm.history.firstOrNull { it.optBoolean("ok") && !it.optBoolean("dry") }
@@ -64,7 +67,7 @@ fun HomeScreen(vm: AppViewModel, a: Actions, openHistory: () -> Unit, openChats:
     }
     Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        HeroCard(hero)
+        HeroCard(hero, spinning = vm.job != null)
         UpdateBanner(vm, a)
         JobBanner(vm)
 
@@ -77,10 +80,10 @@ fun HomeScreen(vm: AppViewModel, a: Actions, openHistory: () -> Unit, openChats:
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            Button(onClick = { vm.runNow() }, enabled = vm.job == null && vm.selectedCount > 0, modifier = Modifier.weight(1f)) {
+            Button(onClick = { haptic(true); vm.runNow() }, enabled = vm.job == null && vm.selectedCount > 0, modifier = Modifier.weight(1f)) {
                 Icon(Icons.Rounded.PlayArrow, null); Spacer(Modifier.width(6.dp)); Text("شغّل الآن")
             }
-            OutlinedButton(onClick = { a.requestLegacyStorage(); vm.dryRun() }, enabled = vm.job == null && vm.selectedCount > 0,
+            OutlinedButton(onClick = { haptic(false); a.requestLegacyStorage(); vm.dryRun() }, enabled = vm.job == null && vm.selectedCount > 0,
                 modifier = Modifier.weight(1f)) {
                 Icon(Icons.Rounded.Science, null); Spacer(Modifier.width(6.dp)); Text("تجربة بدون رفع")
             }
@@ -134,13 +137,18 @@ fun UpdateBanner(vm: AppViewModel, a: Actions) {
 }
 
 @Composable
-private fun HeroCard(h: Hero) {
+private fun HeroCard(h: Hero, spinning: Boolean = false) {
+    val rot = if (spinning) {
+        val inf = androidx.compose.animation.core.rememberInfiniteTransition(label = "spin")
+        inf.animateFloat(0f, 360f, androidx.compose.animation.core.infiniteRepeatable(
+            androidx.compose.animation.core.tween(1600, easing = androidx.compose.animation.core.LinearEasing)), label = "rot").value
+    } else 0f
     val (fg, _) = toneColors(h.tone)
     val bg = Brush.linearGradient(listOf(fg, fg.copy(alpha = 0.78f)))
     Box(Modifier.fillMaxWidth().clip(MaterialTheme.shapes.extraLarge).background(bg).padding(20.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(56.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.2f)), contentAlignment = Alignment.Center) {
-                Icon(h.icon, null, tint = Color.White, modifier = Modifier.size(32.dp))
+                Icon(h.icon, null, tint = Color.White, modifier = Modifier.size(32.dp).graphicsLayer { rotationZ = -rot })
             }
             Spacer(Modifier.width(16.dp))
             Column {

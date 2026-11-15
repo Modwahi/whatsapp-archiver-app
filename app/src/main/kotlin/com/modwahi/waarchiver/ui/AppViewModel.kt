@@ -96,6 +96,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     var countryCode by mutableStateOf(prefs.countryCode); private set
 
     init {
+        Sounds.warmUp(app)
         reload()
         if (System.currentTimeMillis() - prefs.lastUpdateCheck > 6 * 3_600_000L) checkUpdates(manual = false)
         viewModelScope.launch {
@@ -114,19 +115,47 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private var jobStartedAt = 0L
+
     private fun onManual(infos: List<WorkInfo>) {
         val active = infos.firstOrNull { !it.state.isFinished }
         if (active != null) {
-            val action = active.tags.firstOrNull { it in setOf("run", "dry", "list") } ?: "run"
+            val action = active.tags.firstOrNull { it in setOf("run", "dry", "list", "mirror") } ?: "run"
+            if (job == null) {
+                jobStartedAt = System.currentTimeMillis()
+                if (action == "run" || action == "dry") Sounds.play(getApplication(), Sounds.Snd.START, 0.5f)
+            }
             job = Job.from(action, active.progress, "في الانتظار…")
             return
         }
-        val wasList = job?.action == "list" || job?.action == "mirror"
+        val finished = job
+        val wasList = finished?.action == "list" || finished?.action == "mirror"
         job = null
         val done = infos.lastOrNull()
         if (wasList && done?.state == WorkInfo.State.FAILED) listError = done.outputData.getString("error")
         reload()
+        // نهاية أرشفة أو تجربة بدأت والتطبيق مفتوح: صوت + شاشة الملخص
+        if (finished != null && (finished.action == "run" || finished.action == "dry")) {
+            val run = prefs.lastRun?.let { JSONObject(it) }
+            if (run != null && run.optLong("time") >= jobStartedAt) {
+                celebration = run
+                Sounds.play(getApplication(), if (run.optBoolean("ok")) Sounds.Snd.DONE else Sounds.Snd.ERROR)
+            } else if (done?.outputData?.getBoolean("ok", true) == false) {
+                Sounds.play(getApplication(), Sounds.Snd.ERROR)
+            }
+        }
     }
+
+    /** ملخص آخر تشغيل لعرضه في شاشة الاحتفال (null: لا شيء) */
+    var celebration by mutableStateOf<JSONObject?>(null)
+
+    var soundsEnabled by mutableStateOf(prefs.soundsEnabled); private set
+    var hapticsEnabled by mutableStateOf(prefs.hapticsEnabled); private set
+    fun updateSounds(on: Boolean) { prefs.soundsEnabled = on; soundsEnabled = on; if (on) Sounds.play(getApplication(), Sounds.Snd.DONE) }
+    fun updateHaptics(on: Boolean) { prefs.hapticsEnabled = on; hapticsEnabled = on }
+
+    /** نقرة خفيفة عند اختيار محادثة */
+    fun tick() = Sounds.play(getApplication(), Sounds.Snd.TICK, 0.35f)
 
     fun reload() {
         known = prefs.knownChats
