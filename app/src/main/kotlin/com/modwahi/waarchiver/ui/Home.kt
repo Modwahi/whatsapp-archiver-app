@@ -24,6 +24,7 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Schedule
 import androidx.compose.material.icons.rounded.Science
 import androidx.compose.material.icons.rounded.Sync
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material.icons.rounded.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
@@ -64,6 +65,7 @@ fun HomeScreen(vm: AppViewModel, a: Actions, openHistory: () -> Unit, openChats:
     Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HeroCard(hero)
+        UpdateBanner(vm, a)
         JobBanner(vm)
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -100,6 +102,35 @@ private fun firstError(o: JSONObject): String? {
         if (!c.isNull("error")) return "${c.optString("name")}: ${c.optString("error")}"
     }
     return null
+}
+
+@Composable
+fun UpdateBanner(vm: AppViewModel, a: Actions) {
+    val r = vm.update ?: return
+    AppCard {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconBadge(Icons.Rounded.SystemUpdate, Tone.OK, 40)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("تحديث متوفر: ${ltr("v" + r.version)}", style = MaterialTheme.typography.titleMedium)
+                    Text("لديك ${ltr("v" + vm.currentVersion)} · حجمه ${ltr(String.format(java.util.Locale.ROOT, "%.1f", r.apkSize / 1048576.0))} ميغابايت",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+            when (vm.updateState) {
+                "downloading" -> {
+                    Text("جارٍ التنزيل… ${(vm.updatePct * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                    androidx.compose.material3.LinearProgressIndicator(progress = { vm.updatePct }, modifier = Modifier.fillMaxWidth())
+                }
+                "installing" -> Text("جارٍ فتح شاشة التثبيت…", style = MaterialTheme.typography.bodySmall)
+                else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(onClick = { vm.installUpdate(a) }) { Text("تحديث الآن") }
+                    TextButton(onClick = { a.openUrl(r.page) }) { Text("ما الجديد؟") }
+                }
+            }
+        }
+    }
 }
 
 @Composable

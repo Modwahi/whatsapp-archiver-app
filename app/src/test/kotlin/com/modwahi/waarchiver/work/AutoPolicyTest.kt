@@ -29,3 +29,14 @@ class AutoPolicyTest {
         assertEquals(1, AutoPolicy.afterFailure(m + 1, f, 100 * h).count)
     }
 }
+
+class UpdatesTest {
+    @Test fun versionCompare() {
+        val n = com.modwahi.waarchiver.io.Updates::newer
+        assertTrue(n("1.3.1", "1.3.0"))
+        assertTrue(n("v1.10.0", "1.9.9"))
+        assertTrue(n("2.0", "1.99.99"))
+        assertFalse(n("1.3.0", "1.3.0"))
+        assertFalse(n("1.2.9", "1.3.0"))
+    }
+}

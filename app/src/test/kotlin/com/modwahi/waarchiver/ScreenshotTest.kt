@@ -51,6 +51,7 @@ class ScreenshotTest {
         override fun requestContacts() {}
         override fun openDownloads() {}
         override fun openAppSettings() {}
+        override fun openInstallPermission() {}
     }
 
     private fun seed(setupDone: Boolean) {
@@ -120,6 +121,16 @@ class ScreenshotTest {
         render(job = com.modwahi.waarchiver.ui.Job("run", "رفع: طلبات التحويل_ الشركة", 71, 3,
             done = 38_400_000, total = 87_200_000, speed = 1_250_000, eta = 39))
         shot("12_uploading")
+    }
+
+    @Test fun updateAvailable() {
+        seed(true)
+        val vm = AppViewModel(ApplicationProvider.getApplicationContext())
+        vm.previewUpdate(com.modwahi.waarchiver.io.Updates.Release("1.4.0", "", "", "whatsapp-archiver-v1.4.0.apk", 2_600_000, ""))
+        rule.setContent {
+            AppTheme(0) { CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) { Root(vm, actions) } }
+        }
+        shot("13_update")
     }
 
     @Test fun dark() {
