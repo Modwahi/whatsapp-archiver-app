@@ -169,3 +169,35 @@ class PythonParityTest {
         assertTrue(s.render().startsWith("=== تشغيل 2026-11-02 04:00:00 ==="))
     }
 }
+
+/** الشريط الكلي: يتقدم من 0 إلى 1 بلا تراجع، والحجم المرفوع يساوي حجم الملفات فعلاً. */
+class ProgressTest {
+    @get:Rule val tmp = TemporaryFolder()
+
+    @Suppress("UNCHECKED_CAST")
+    @Test fun overallProgressMonotonicAndExactBytes() {
+        val sd = File("src/test/resources/fixtures/full_sequence/step1")
+        val step = Json.parse(File(sd, "step.json").readText()) as JObj
+        val c = step["config"] as JObj
+        val wa = tmp.newFolder("WhatsApp")
+        File(sd, "input/wa").copyRecursively(wa)
+        File(wa, "Databases").mkdirs()
+        File(sd, "input/msgstore.db.crypt15").copyTo(File(wa, "Databases/msgstore.db.crypt15"))
+        val remote = tmp.newFolder("drive")
+        val events = mutableListOf<RunProgress>()
+        val s = runArchive(
+            ArchiveConfig(chats = (c["chats"] as List<JObj>).map { ChatSpec(it["jid"] as String, it["name"] as String) },
+                maxMediaMb = 1, zone = java.time.ZoneId.of("Asia/Aden")),
+            Paths(tmp.newFolder("home")), step["key"] as String, FileSourceFs(wa), LocalUploader(remote),
+            PythonParityTest.NullLog, JdbcOpener, contacts = mapOf("967771111111" to "أحمد"), now = step["now"].asDouble(),
+            onProgress = { events.add(it) })!!
+        assertTrue(s.ok)
+        val overall = events.map { it.overall }
+        assertEquals(overall, overall.sorted())
+        assertEquals(1.0, overall.last(), 0.0)
+        assertEquals(listOf(1, 2, 3), events.map { it.phase }.distinct())
+        val chatBytes = remote.walkTopDown().filter { it.isFile && !it.path.contains(LOG_DIR_REMOTE) }.sumOf { it.length() }
+        assertEquals(chatBytes, events.last().bytesTotal)
+        assertEquals(chatBytes, events.last().bytesDone)
+    }
+}

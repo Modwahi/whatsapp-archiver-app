@@ -137,14 +137,16 @@ class SafUploader(private val context: Context, private val tree: Uri) : Uploade
         return cr.openInputStream(f.uri)?.use { it.readBytes() }
     }
 
-    override fun uploadDir(localDir: File, relDir: String) {
+    override fun uploadDir(localDir: File, relDir: String) = uploadDir(localDir, relDir) { }
+
+    override fun uploadDir(localDir: File, relDir: String, onBytes: (Long) -> Unit) {
         localDir.walkTopDown().filter { it.isFile }.sortedBy { it.path }.forEach { src ->
             val relParent = src.parentFile!!.relativeTo(localDir).path
             val dir = findDir(listOf(relDir, relParent).filter { it.isNotEmpty() }.joinToString("/"), create = true)!!
             val kids = children(dir)
             val existing = kids[src.name]
             if (existing != null && !src.name.startsWith("الرسائل.") && !src.name.endsWith(".txt") &&
-                existing.size == src.length()) return@forEach // وسيط موجود بنفس الحجم
+                existing.size == src.length()) { onBytes(src.length()); return@forEach } // وسيط موجود بنفس الحجم
             val target = existing?.uri ?: run {
                 val ext = src.extension.lowercase()
                 val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
@@ -154,7 +156,15 @@ class SafUploader(private val context: Context, private val tree: Uri) : Uploade
                 }
             }
             (cr.openOutputStream(target, "wt") ?: throw UploadError("تعذّر الكتابة في ${src.name}")).use { out ->
-                src.inputStream().use { it.copyTo(out, 256 * 1024) }
+                src.inputStream().use { inp ->
+                    val buf = ByteArray(256 * 1024)
+                    while (true) {
+                        val n = inp.read(buf)
+                        if (n < 0) break
+                        out.write(buf, 0, n)
+                        onBytes(n.toLong())
+                    }
+                }
             }
         }
     }

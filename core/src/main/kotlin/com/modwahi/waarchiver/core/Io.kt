@@ -32,6 +32,12 @@ interface SourceFs {
 interface Uploader {
     fun readFile(relDir: String, name: String): ByteArray?
     fun uploadDir(localDir: File, relDir: String)
+
+    /** نفس uploadDir مع الإبلاغ عن البايتات المرفوعة (فرق موجب، أو سالب عند إعادة محاولة ملف). */
+    fun uploadDir(localDir: File, relDir: String, onBytes: (Long) -> Unit) {
+        uploadDir(localDir, relDir)
+        onBytes(localDir.walkTopDown().filter { it.isFile }.sumOf { it.length() })
+    }
 }
 
 class UploadError(message: String, cause: Throwable? = null) : Exception(message, cause)
@@ -58,13 +64,16 @@ class LocalUploader(private val base: File) : Uploader {
         return if (p.exists()) p.readBytes() else null
     }
 
-    override fun uploadDir(localDir: File, relDir: String) {
+    override fun uploadDir(localDir: File, relDir: String) = uploadDir(localDir, relDir) { }
+
+    override fun uploadDir(localDir: File, relDir: String, onBytes: (Long) -> Unit) {
         val dest = File(base, relDir)
         localDir.walkTopDown().filter { it.isFile }.forEach { src ->
             val target = File(dest, src.relativeTo(localDir).path)
             target.parentFile?.mkdirs()
             src.copyTo(target, overwrite = true)
             target.setLastModified(src.lastModified())
+            onBytes(src.length())
         }
     }
 }

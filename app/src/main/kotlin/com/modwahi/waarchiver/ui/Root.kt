@@ -351,24 +351,49 @@ fun DestinationPicker(vm: AppViewModel, a: Actions) {
     }
 }
 
+private fun mb(b: Long) = String.format(java.util.Locale.ROOT, "%.1f", b / 1048576.0)
+
+private fun duration(secs: Long): String = when {
+    secs < 60 -> "أقل من دقيقة"
+    secs < 3600 -> arCount((secs + 59) / 60, "دقيقة", "دقيقتين", "دقائق")
+    else -> "${secs / 3600} س ${(secs % 3600) / 60} د"
+}
+
 @Composable
 fun JobBanner(vm: AppViewModel) {
     val j = vm.job ?: return
-    val what = when (j.action) { "dry" -> "تجربة بدون رفع"; "list" -> "قراءة المحادثات"; "scheduled" -> "تشغيل مجدول"; else -> "أرشفة" }
+    val what = when (j.action) { "dry" -> "تجربة بدون رفع"; "list" -> "قراءة المحادثات"; "mirror" -> "تنزيل للقراءة"
+        "scheduled" -> "أرشفة تلقائية"; else -> "أرشفة" }
     AppCard {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
-                Spacer(Modifier.size(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text(what, style = MaterialTheme.typography.titleSmall)
-                    Text(j.stage + if (j.pct >= 0) " — ${j.pct}%" else "", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (j.phase > 0) Text("المرحلة ${j.phase} من 3 — ${j.stage}", style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                    else Text(j.stage, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                if (j.pct >= 0) Text("${j.pct}%", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+                else CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.5.dp)
                 TextButton(onClick = { vm.stop() }) { Text("إيقاف") }
             }
-            if (j.pct >= 0) LinearProgressIndicator(progress = { j.pct / 100f }, modifier = Modifier.fillMaxWidth())
+            if (j.pct >= 0) LinearProgressIndicator(progress = { j.pct / 100f }, modifier = Modifier.fillMaxWidth().height(8.dp),
+                strokeCap = androidx.compose.ui.graphics.StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
             else LinearProgressIndicator(Modifier.fillMaxWidth())
+            if (j.phase > 0) Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                listOf("فك النسخة", "تجهيز", "رفع").forEachIndexed { i, t ->
+                    val n = i + 1
+                    Pill(if (j.phase > n) "✓ $t" else if (j.phase == n) "● $t" else t, if (j.phase > n) Tone.OK else Tone.INFO)
+                }
+            }
+            if (j.phase == 3 && j.total > 0) {
+                Text("المرفوع: ${ltr(mb(j.done))} من ${ltr(mb(j.total))} ميغابايت", style = MaterialTheme.typography.bodyMedium)
+                if (j.speed > 0) Text("السرعة ${ltr(mb(j.speed))} ميغابايت/ث" + if (j.eta >= 0) " · المتبقي ${duration(j.eta)}" else "",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            } else if (j.phase == 3 && j.action == "dry") {
+                Text("التجربة لا ترفع شيئاً", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }

@@ -51,8 +51,10 @@ class Mirror(val root: File) {
 /** يرفع كالمعتاد، ثم يحفظ نسخة القراءة بعد نجاح الرفع فقط */
 class MirroringUploader(val inner: Uploader, private val mirror: Mirror) : Uploader {
     override fun readFile(relDir: String, name: String) = inner.readFile(relDir, name)
-    override fun uploadDir(localDir: File, relDir: String) {
-        inner.uploadDir(localDir, relDir)
+    override fun uploadDir(localDir: File, relDir: String) = uploadDir(localDir, relDir) { }
+
+    override fun uploadDir(localDir: File, relDir: String, onBytes: (Long) -> Unit) {
+        inner.uploadDir(localDir, relDir, onBytes)
         runCatching { mirror.capture(localDir, relDir) }
     }
 }

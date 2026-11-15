@@ -23,6 +23,9 @@ object Notifier {
     private const val ID_WARNING = 3
     private const val ID_INFO = 4
 
+    /** ميغابايت بخانة عشرية واحدة */
+    fun mb(bytes: Long): String = String.format(java.util.Locale.ROOT, "%.1f", bytes / 1048576.0)
+
     fun createChannels(context: Context) {
         val nm = context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel(CH_PROGRESS, "أثناء الأرشفة", NotificationManager.IMPORTANCE_LOW))

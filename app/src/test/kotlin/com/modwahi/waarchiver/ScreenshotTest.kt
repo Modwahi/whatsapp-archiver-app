@@ -92,8 +92,9 @@ class ScreenshotTest {
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    private fun render(dark: Int = 0) {
+    private fun render(dark: Int = 0, job: com.modwahi.waarchiver.ui.Job? = null) {
         val vm = AppViewModel(ApplicationProvider.getApplicationContext())
+        vm.previewJob(job)
         vm.updateTheme(dark)
         rule.setContent {
             AppTheme(vm.themeMode) {
@@ -112,6 +113,13 @@ class ScreenshotTest {
         shot("3_settings")
         rule.onNodeWithText("سجل التشغيلات").performScrollTo().performClick()
         shot("4_history")
+    }
+
+    @Test fun uploading() {
+        seed(true)
+        render(job = com.modwahi.waarchiver.ui.Job("run", "رفع: طلبات التحويل_ الشركة", 71, 3,
+            done = 38_400_000, total = 87_200_000, speed = 1_250_000, eta = 39))
+        shot("12_uploading")
     }
 
     @Test fun dark() {

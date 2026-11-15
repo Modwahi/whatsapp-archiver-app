@@ -15,7 +15,10 @@ const val LOG_DIR_REMOTE = "_سجل التشغيل"
 const val RECENT_WINDOW_S = 10 * 60L          // إعادة فحص آخر ١٠ دقائق (تُستبعد المكررات بالـ id)
 const val LOOKBACK_FLOOR_S = 3 * 86400L       // لا نرجع أكثر من ٣ أيام قبل آخر رسالة محفوظة
 const val MAX_PENDING_ATTEMPTS = 7
-const val MIN_BACKUP_AGE_S = 10 * 60.0        // لا نقرأ نسخة كُتبت للتو (قد يكون واتساب ما زال يكتبها)
+const val MIN_BACKUP_AGE_S = 10 * 60.0
+// أوزان مراحل الشريط الكلي: الفك 35٪، التجهيز 10٪، الرفع الباقي
+private const val W_DECRYPT = 0.35
+private const val W_PREPARE = 0.10        // لا نقرأ نسخة كُتبت للتو (قد يكون واتساب ما زال يكتبها)
 
 open class RunError(message: String) : Exception(message)
 
@@ -23,6 +26,18 @@ open class RunError(message: String) : Exception(message)
 class BusyError : RunError("يوجد تشغيل آخر قيد العمل الآن")
 
 data class ChatSpec(val jid: String, val name: String = "")
+
+/**
+ * تقدّم التشغيل كاملاً: المرحلة ١ فك النسخة، ٢ تجهيز المحادثات، ٣ الرفع.
+ * overall نسبة العملية كلها (0..1)، و bytesDone/bytesTotal حجم الرفع الفعلي بالبايت.
+ */
+data class RunProgress(
+    val phase: Int,
+    val label: String,
+    val overall: Double,
+    val bytesDone: Long = 0,
+    val bytesTotal: Long = 0,
+)
 
 data class ArchiveConfig(
     val chats: List<ChatSpec> = emptyList(),
@@ -258,7 +273,7 @@ class Archiver(
 
     // ---------- محادثة واحدة ----------
     @Suppress("UNCHECKED_CAST")
-    fun processChat(db: WaDb, spec: ChatSpec, state: State, staging: File): ChatResult {
+    fun prepareChat(db: WaDb, spec: ChatSpec, state: State, staging: File): Prepared {
         val res = ChatResult(jid = spec.jid, name = spec.name.ifEmpty { spec.jid })
         val chat = db.findChat(spec.jid)
             ?: throw RunError("المحادثة غير موجودة في النسخة الاحتياطية (ربما حُذفت أو غُيّرت)")
@@ -332,18 +347,32 @@ class Archiver(
         }
 
         for (date in touched) days.getValue(date).write(File(chatStage, date), zone)
-        if (touched.isNotEmpty() && !dryRun) uploader.uploadDir(chatStage, folder)
 
         // بعد نجاح الرفع فقط نحدّث الحالة
-        cs["last_row_id"] = maxRow
-        cs["last_timestamp"] = maxTs
-        cs["pending_media"] = ArrayList(kept + newPending)
-        cs["folder"] = folder
-        if (!dryRun) {
-            state.save()
-            chatStage.deleteRecursively()
+        val commit = {
+            cs["last_row_id"] = maxRow
+            cs["last_timestamp"] = maxTs
+            cs["pending_media"] = ArrayList(kept + newPending)
+            cs["folder"] = folder
+            if (!dryRun) {
+                state.save()
+                chatStage.deleteRecursively()
+            }
         }
-        return res
+        return Prepared(res, folder, chatStage, touched.isNotEmpty() && !dryRun, commit)
+    }
+
+    /** محادثة جاهزة للرفع: ملفاتها في stage، و commit يحدّث الحالة بعد نجاح الرفع. */
+    class Prepared(val res: ChatResult, val folder: String, val stage: File, val needsUpload: Boolean, val commit: () -> Unit) {
+        val bytes: Long get() = if (needsUpload) stage.walkTopDown().filter { it.isFile }.sumOf { it.length() } else 0L
+    }
+
+    /** تجهيز ثم رفع محادثة واحدة (نفس ترتيب الأداة) */
+    fun processChat(db: WaDb, spec: ChatSpec, state: State, staging: File): ChatResult {
+        val p = prepareChat(db, spec, state, staging)
+        if (p.needsUpload) uploader.uploadDir(p.stage, p.folder)
+        p.commit()
+        return p.res
     }
 }
 
@@ -355,7 +384,7 @@ fun runArchive(
     cfg: ArchiveConfig, paths: Paths, key: String, source: SourceFs, uploader: Uploader, log: ArchLog,
     opener: SqlOpener, contacts: Map<String, String> = emptyMap(), dryRun: Boolean = false,
     scheduled: Boolean = false, dryDir: File? = null, now: Double = System.currentTimeMillis() / 1000.0,
-    onProgress: ((String, Double?) -> Unit)? = null,
+    onProgress: ((RunProgress) -> Unit)? = null,
     /** يُستدعى بقائمة كل المحادثات بعد الفك (ليتحدث عرض المحادثات بدون فك إضافي). */
     onChats: ((List<ChatInfo>) -> Unit)? = null,
 ): Summary? {
@@ -397,22 +426,56 @@ fun runArchive(
         staging.mkdirs()
         val archiver = Archiver(cfg, source, uploader, log, contacts, dryRun, now)
         try {
-            withDecryptedDb(source, paths, key, log, opener, { onProgress?.invoke("فك النسخة الاحتياطية", it) }) { db ->
-                onProgress?.invoke("قراءة المحادثات", null)
+            // المرحلة ١ و ٢: فك النسخة وتجهيز كل المحادثات (القاعدة المفكوكة تُحذف قبل الرفع)
+            val slots = arrayOfNulls<ChatResult>(cfg.chats.size)
+            val prepared = ArrayList<Pair<Int, Archiver.Prepared>>()
+            withDecryptedDb(source, paths, key, log, opener, {
+                onProgress?.invoke(RunProgress(1, "فك النسخة الاحتياطية", W_DECRYPT * it))
+            }) { db ->
+                onProgress?.invoke(RunProgress(2, "قراءة المحادثات", W_DECRYPT))
                 onChats?.let { cb -> runCatching { cb(db.listChatsCached()) } }
                 cfg.chats.forEachIndexed { i, spec ->
-                    onProgress?.invoke("المحادثة ${i + 1} من ${cfg.chats.size}", null)
-                    val r = try {
-                        archiver.processChat(db, spec, state, staging).also {
-                            log.info("[${it.name}] رسائل ${it.messages} | وسائط ${it.media} | غير منزّلة ${it.mediaMissing}")
-                        }
+                    onProgress?.invoke(RunProgress(2, "تجهيز المحادثة ${i + 1} من ${cfg.chats.size}",
+                        W_DECRYPT + W_PREPARE * i / cfg.chats.size))
+                    try {
+                        prepared.add(i to archiver.prepareChat(db, spec, state, staging))
                     } catch (e: Exception) { // خطأ في محادثة لا يوقف الباقي
-                        ChatResult(jid = spec.jid, name = spec.name.ifEmpty { spec.jid },
+                        slots[i] = ChatResult(jid = spec.jid, name = spec.name.ifEmpty { spec.jid },
                             error = e.message ?: e.javaClass.simpleName).also { log.error("[${it.name}] فشل: ${it.error}") }
                     }
-                    summary.chats.add(r)
                 }
             }
+            // المرحلة ٣: الرفع، مع الحجم الكلي الدقيق مسبقاً
+            val total = prepared.sumOf { it.second.bytes }
+            var done = 0L
+            val doneLock = Any()
+            val base = W_DECRYPT + W_PREPARE
+            fun upProgress(label: String) = onProgress?.invoke(RunProgress(3, label,
+                if (total > 0) base + (1 - base) * done.toDouble() / total else 1.0, done, total))
+            if (total > 0) {
+                log.info("الرفع: ${prepared.count { it.second.needsUpload }} محادثة، ${total / 1024} كيلوبايت")
+                upProgress("رفع")
+            }
+            for ((i, p) in prepared) {
+                try {
+                    if (p.needsUpload) {
+                        val before = done
+                        val chatBytes = p.bytes
+                        uploader.uploadDir(p.stage, p.folder) { delta ->
+                            synchronized(doneLock) { done = (done + delta).coerceIn(before, before + chatBytes) }
+                            upProgress("رفع: ${p.res.name}")
+                        }
+                        done = before + chatBytes
+                    }
+                    p.commit()
+                    slots[i] = p.res.also { log.info("[${it.name}] رسائل ${it.messages} | وسائط ${it.media} | غير منزّلة ${it.mediaMissing}") }
+                } catch (e: Exception) {
+                    slots[i] = ChatResult(jid = cfg.chats[i].jid, name = cfg.chats[i].name.ifEmpty { cfg.chats[i].jid },
+                        error = e.message ?: e.javaClass.simpleName).also { log.error("[${it.name}] فشل: ${it.error}") }
+                }
+            }
+            slots.forEach { r -> if (r != null) summary.chats.add(r) }
+            onProgress?.invoke(RunProgress(3, "اكتمل", 1.0, done, total))
             if (summary.ok && !dryRun && mtime != null) {
                 state.lastBackupMtime = mtime
                 state.save()

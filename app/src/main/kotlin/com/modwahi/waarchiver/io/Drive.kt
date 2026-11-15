@@ -17,6 +17,29 @@ import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 /**
+ * جسم طلب يرفع ملفاً ويبلّغ عن البايتات المرسلة. عند إعادة المحاولة يطرح ما أبلغ عنه في المحاولة السابقة
+ * حتى يبقى العدّاد الكلي دقيقاً.
+ */
+class CountingFileBody(private val file: File, private val type: okhttp3.MediaType, private val onBytes: ((Long) -> Unit)?) : RequestBody() {
+    private var sentThisAttempt = 0L
+    override fun contentType() = type
+    override fun contentLength() = file.length()
+    override fun writeTo(sink: okio.BufferedSink) {
+        if (sentThisAttempt > 0) { onBytes?.invoke(-sentThisAttempt); sentThisAttempt = 0 }
+        file.inputStream().use { inp ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = inp.read(buf)
+                if (n < 0) break
+                sink.write(buf, 0, n)
+                sentThisAttempt += n
+                onBytes?.invoke(n.toLong())
+            }
+        }
+    }
+}
+
+/**
  * Google Drive REST v3 بصلاحية drive.file فقط: التطبيق يرى ويكتب فقط الملفات التي أنشأها هو.
  * العمليات المستخدمة: بحث، قراءة، إنشاء، وتحديث محتوى ملف موجود. لا يوجد أي طلب DELETE ولا نقل للمهملات.
  *
@@ -141,7 +164,7 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
     fun download(id: String): ByteArray = call({ it.url("$API/files/$id?alt=media") }) { it.body.bytes() }
 
     /** إنشاء ملف جديد (رفع resumable يتحمل الملفات الكبيرة). */
-    fun create(parentId: String, name: String, file: File, mime: String): String {
+    fun create(parentId: String, name: String, file: File, mime: String, onBytes: ((Long) -> Unit)? = null): String {
         val meta = JSONObject().put("name", name).put("parents", JSONArray().put(parentId))
         val session = call({
             it.url("$UPLOAD/files?uploadType=resumable&fields=id")
@@ -149,14 +172,14 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
                 .header("X-Upload-Content-Length", file.length().toString())
                 .post(meta.toString().toRequestBody(JSON))
         }) { it.header("Location") ?: throw UploadError("Google Drive لم يرجع رابط الرفع") }
-        return call({ it.url(session).put(file.asRequestBody(mime.toMediaType())) }) {
+        return call({ it.url(session).put(CountingFileBody(file, mime.toMediaType(), onBytes)) }) {
             JSONObject(it.body.string()).getString("id")
         }
     }
 
     /** تحديث محتوى ملف موجود (الرسائل.json/txt والملخص) — بدون حذف. */
-    fun update(id: String, file: File, mime: String) {
-        val body: RequestBody = file.asRequestBody(mime.toMediaType())
+    fun update(id: String, file: File, mime: String, onBytes: ((Long) -> Unit)? = null) {
+        val body: RequestBody = CountingFileBody(file, mime.toMediaType(), onBytes)
         call({ it.url("$UPLOAD/files/$id?uploadType=media&fields=id").patch(body) }) { }
     }
 }
@@ -170,7 +193,6 @@ class DriveClient(private val tokenProvider: (Boolean) -> String) {
 class DriveUploader(
     private val drive: DriveClient,
     private val rootId: String,
-    private val onFile: ((done: Int, total: Int) -> Unit)? = null,
 ) : Uploader {
     private val dirIds = HashMap<String, String>()               // مسار نسبي ← ID
     private val listings = HashMap<String, MutableMap<String, DriveClient.DFile>>() // ID ← (اسم ← ملف)
@@ -212,7 +234,10 @@ class DriveUploader(
         return drive.download(f.id)
     }
 
-    override fun uploadDir(localDir: File, relDir: String) {
+    override fun uploadDir(localDir: File, relDir: String) = uploadDir(localDir, relDir) { }
+
+    override fun uploadDir(localDir: File, relDir: String, onBytes: (Long) -> Unit) {
+        val report: (Long) -> Unit = { synchronized(this) { onBytes(it) } }
         val files = localDir.walkTopDown().filter { it.isFile }.sortedBy { it.path }.toList()
         val done = java.util.concurrent.atomic.AtomicInteger()
         val jobs = files.map { src ->
@@ -224,14 +249,14 @@ class DriveUploader(
                 val existing = kids[src.name]
                 when {
                     existing == null -> {
-                        val id = drive.create(dir, src.name, src, mime)
+                        val id = drive.create(dir, src.name, src, mime, report)
                         kids[src.name] = DriveClient.DFile(id, src.name, mime, src.length(), false)
                     }
                     // الرسائل والملخص تتغير: نحدّث المحتوى. الوسائط بنفس الاسم والحجم موجودة: لا داعي لرفعها
                     src.name.endsWith(".json") || src.name.endsWith(".txt") || existing.size != src.length() ->
-                        drive.update(existing.id, src, mime)
+                        drive.update(existing.id, src, mime, report)
+                    else -> report(src.length()) // موجود مسبقاً: لا حاجة لرفعه
                 }
-                onFile?.invoke(done.incrementAndGet(), files.size)
             }
         }
         // ننتظر الكل؛ أول خطأ يُرمى كما هو (فلا تتقدم حالة المحادثة)

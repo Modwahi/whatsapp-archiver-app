@@ -30,7 +30,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
-data class Job(val action: String, val stage: String, val pct: Int)
+data class Job(
+    val action: String, val stage: String, val pct: Int,
+    val phase: Int = 0, val done: Long = 0, val total: Long = 0, val speed: Long = 0, val eta: Long = -1,
+) {
+    companion object {
+        fun from(action: String, d: androidx.work.Data, fallback: String) = Job(action, d.getString("stage") ?: fallback,
+            d.getInt("pct", -1), d.getInt("phase", 0), d.getLong("done", 0), d.getLong("total", 0),
+            d.getLong("speed", 0), d.getLong("eta", -1))
+    }
+}
 
 enum class SortBy { RECENT, NAME, MESSAGES }
 
@@ -91,7 +100,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 nextCheckAt = p?.nextScheduleTimeMillis?.takeIf { it > 0 && it != Long.MAX_VALUE }
                 if (job == null || job?.action == "scheduled") {
                     val running = infos.firstOrNull { it.state == WorkInfo.State.RUNNING }
-                    job = running?.let { Job("scheduled", it.progress.getString("stage") ?: "تشغيل مجدول…", it.progress.getInt("pct", -1)) }
+                    job = running?.let { Job.from("scheduled", it.progress, "تشغيل مجدول…") }
                     if (running == null) reload()
                 }
             }
@@ -102,7 +111,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val active = infos.firstOrNull { !it.state.isFinished }
         if (active != null) {
             val action = active.tags.firstOrNull { it in setOf("run", "dry", "list") } ?: "run"
-            job = Job(action, active.progress.getString("stage") ?: "في الانتظار…", active.progress.getInt("pct", -1))
+            job = Job.from(action, active.progress, "في الانتظار…")
             return
         }
         val wasList = job?.action == "list" || job?.action == "mirror"
@@ -133,6 +142,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             readable = withContext(Dispatchers.IO) { engine.mirror.chats() }
         }
     }
+
+    /** للقطات الشاشة في الاختبارات فقط */
+    @androidx.annotation.VisibleForTesting
+    fun previewJob(j: Job?) { job = j }
 
     fun dismissCrash() {
         App.crashFile(getApplication()).delete()

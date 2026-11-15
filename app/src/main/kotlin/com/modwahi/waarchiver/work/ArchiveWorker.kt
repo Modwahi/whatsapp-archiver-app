@@ -82,6 +82,9 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
     override suspend fun getForegroundInfo(): ForegroundInfo = foreground("بدء التشغيل…", null)
 
     private var lastPct = -1
+    private var lastSentAt = 0L
+    private var uploadStartAt = 0L
+    private var uploadStartBytes = 0L
 
     private suspend fun progress(stage: String, pct: Double?) {
         if (isStopped) throw StoppedByUser()
@@ -90,6 +93,32 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
         lastPct = p
         setProgress(workDataOf("stage" to stage, "pct" to p))
         try { setForeground(foreground(stage, pct)) } catch (_: Throwable) {}
+    }
+
+    /** تقدّم التشغيل كاملاً: نسبة كلية، وحجم الرفع، والسرعة، والوقت المتبقي */
+    private suspend fun runProgress(r: com.modwahi.waarchiver.core.RunProgress) {
+        if (isStopped) throw StoppedByUser()
+        val now = System.currentTimeMillis()
+        val p = (r.overall * 100).toInt()
+        if (p == lastPct && now - lastSentAt < 700) return
+        lastPct = p
+        lastSentAt = now
+        var speed = 0L
+        var eta = -1L
+        if (r.phase == 3 && r.bytesTotal > 0) {
+            if (uploadStartAt == 0L) { uploadStartAt = now; uploadStartBytes = r.bytesDone }
+            val secs = (now - uploadStartAt) / 1000.0
+            if (secs >= 2) {
+                speed = ((r.bytesDone - uploadStartBytes) / secs).toLong()
+                if (speed > 0) eta = ((r.bytesTotal - r.bytesDone) / speed)
+            }
+        }
+        setProgress(workDataOf("stage" to r.label, "pct" to p, "phase" to r.phase,
+            "done" to r.bytesDone, "total" to r.bytesTotal, "speed" to speed, "eta" to eta))
+        val text = if (r.phase == 3 && r.bytesTotal > 0)
+            "رفع ${Notifier.mb(r.bytesDone)} من ${Notifier.mb(r.bytesTotal)} ميغابايت"
+        else "${r.phase}/3 ${r.label}"
+        try { setForeground(foreground(text, r.overall)) } catch (_: Throwable) {}
     }
 
     private fun recordAuto(prefs: Prefs, tone: String, text: String) {
@@ -160,7 +189,8 @@ class ArchiveWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                     Result.success(workDataOf("ok" to true, "fetched" to n))
                 }
                 else -> {
-                    val (summary, exported) = engine.run(scheduled = scheduled, dryRun = action == "dry", progress = report)
+                    val (summary, exported) = engine.run(scheduled = scheduled, dryRun = action == "dry",
+                        progress = { r -> kotlinx.coroutines.runBlocking { runProgress(r) } })
                     if (isStopped) {
                         if (scheduled) { recordAuto(prefs, "warn", "توقف قبل أن يكتمل: ${stopReasonText()}"); noteFailure(prefs, backupMs, null) }
                         return@withContext Result.success()
