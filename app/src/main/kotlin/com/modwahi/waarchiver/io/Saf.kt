@@ -76,7 +76,12 @@ class SafSource(private val context: Context, treeUri: Uri) : SourceFs {
         get() = "${base.substringAfter(':')}/Databases/msgstore*.db.crypt15"
 
     /** أحدث ملف نسخة في Databases (الاسم الثابت أو المؤرّخ). */
-    override fun backup(): SourceFile? {
+    override fun backup(): SourceFile? =
+        SourceFs.newest(databases(SourceFs.BACKUP_NAME).asSequence()) ?: fileAt("Databases/msgstore.db.crypt15")
+
+    override fun increments(): List<SourceFile> = databases(SourceFs.INCREMENT_NAME).sortedBy { it.mtime }
+
+    private fun databases(pattern: Regex): List<SourceFile> {
         val dirId = "$base/Databases"
         val q = DocumentsContract.buildChildDocumentsUriUsingTree(tree, dirId)
         val found = ArrayList<SourceFile>()
@@ -85,16 +90,16 @@ class SafSource(private val context: Context, treeUri: Uri) : SourceFs {
                 Document.COLUMN_LAST_MODIFIED, Document.COLUMN_MIME_TYPE), null, null, null)?.use { c ->
                 while (c.moveToNext()) {
                     val name = c.getString(1) ?: continue
-                    if (!SourceFs.BACKUP_NAME.matches(name)) continue
+                    if (!pattern.matches(name)) continue
                     val inf = DocInfo(DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0)), name,
                         if (c.isNull(2)) 0 else c.getLong(2), if (c.isNull(3)) 0 else c.getLong(3), c.getString(4) ?: "")
                     wrap(inf, "Databases/$name")?.let { found.add(it) }
                 }
             }
         } catch (e: Exception) {
-            // لا صلاحية أو لا مجلد: نجرب الاسم الثابت مباشرة
+            // لا صلاحية أو لا مجلد
         }
-        return SourceFs.newest(found.asSequence()) ?: fileAt("Databases/msgstore.db.crypt15")
+        return found
     }
 
     override fun media(rel: String): SourceFile? {

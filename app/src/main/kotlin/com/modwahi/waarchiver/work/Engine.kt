@@ -162,6 +162,15 @@ class Engine(private val context: Context) {
         return null
     }
 
+    /** تشخيص ملفات النسخ التزايدية: بنية فقط بدون محتوى الرسائل. */
+    fun probeIncrements(): String {
+        val src = source()
+        val r = com.modwahi.waarchiver.core.IncrementProbe.report(src.backup(), src.increments(), key(),
+            File(paths.tmp, "probe"), AndroidSql)
+        log.info(r)
+        return r
+    }
+
     fun backupMtimeMs(): Long? = runCatching { source().backup()?.mtime?.let { (it * 1000).toLong() } }.getOrNull()
 
     fun backupAgeHours(): Double? = backupMtimeMs()?.let { (System.currentTimeMillis() - it) / 3_600_000.0 }

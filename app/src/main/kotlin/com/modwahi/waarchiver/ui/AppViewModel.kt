@@ -283,6 +283,18 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         else null
     }
 
+    // ---------- تشخيص النسخ التزايدية ----------
+    var probeText by mutableStateOf<String?>(null)
+
+    fun probeIncrements() {
+        probeText = "جارٍ الفحص… (قد يأخذ دقيقة)"
+        viewModelScope.launch {
+            probeText = withContext(Dispatchers.IO) {
+                runCatching { engine.probeIncrements() }.getOrElse { "فشل: ${it.message}" }
+            }
+        }
+    }
+
     // ---------- المفتاح ----------
     suspend fun verifyAndSaveKey(raw: String): String? = withContext(Dispatchers.IO) {
         val key = Crypt15.cleanKey(raw)

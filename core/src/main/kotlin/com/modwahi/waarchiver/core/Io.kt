@@ -26,8 +26,12 @@ interface SourceFs {
      */
     fun backup(): SourceFile?
 
+    /** ملفات النسخ التزايدية msgstore-increment-N.db.crypt15 (للتشخيص). */
+    fun increments(): List<SourceFile> = emptyList()
+
     companion object {
         /** msgstore.db.crypt15 أو msgstore-YYYY-MM-DD.N.db.crypt15 */
+        val INCREMENT_NAME = Regex("""msgstore-increment-\d+(-[\d-]+)?(\.\d+)?\.db\.crypt15""")
         val BACKUP_NAME = Regex("""msgstore(-\d{4}-\d{2}-\d{2}\.\d+)?\.db\.crypt15""")
         fun newest(files: Sequence<SourceFile>): SourceFile? =
             files.filter { BACKUP_NAME.matches(it.name) && it.size > 0 }
@@ -67,6 +71,10 @@ class FileSourceFs(private val root: File) : SourceFs {
 
     override fun backup(): SourceFile? =
         SourceFs.newest((File(root, "Databases").listFiles() ?: emptyArray()).asSequence().mapNotNull { wrap(it) })
+    override fun increments(): List<SourceFile> =
+        (File(root, "Databases").listFiles() ?: emptyArray()).filter { SourceFs.INCREMENT_NAME.matches(it.name) }
+            .mapNotNull { wrap(it) }.sortedBy { it.mtime }
+
     override fun media(rel: String): SourceFile? = wrap(if (rel.startsWith("/")) File(rel) else File(root, rel))
 }
 
