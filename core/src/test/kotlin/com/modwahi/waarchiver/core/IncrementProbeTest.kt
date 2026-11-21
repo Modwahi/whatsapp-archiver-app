@@ -27,3 +27,27 @@ class IncrementProbeTest {
         assertFalse(work.listFiles()!!.any { it.name.startsWith("probe") })
     }
 }
+
+class IncrementProbeZipTest {
+    @get:Rule val tmp = TemporaryFolder()
+
+    @Test fun listsZipEntriesAndDescribesSqliteAndJsonKeys() {
+        val dbFile = File(tmp.root, "inner.db")
+        java.sql.DriverManager.getConnection("jdbc:sqlite:${dbFile.path}").use { c ->
+            c.createStatement().use { it.execute("CREATE TABLE message(_id INTEGER PRIMARY KEY, chat_row_id INT, text_data TEXT)") }
+            c.createStatement().use { it.execute("INSERT INTO message VALUES (5, 2, 'سري')") }
+        }
+        val zipFile = File(tmp.root, "x.zip")
+        java.util.zip.ZipOutputStream(zipFile.outputStream()).use { z ->
+            z.putNextEntry(java.util.zip.ZipEntry("db/msgstore.db")); z.write(dbFile.readBytes()); z.closeEntry()
+            z.putNextEntry(java.util.zip.ZipEntry("meta.json")); z.write("""{"version": 3, "rows": [{"key": "سري"}]}""".toByteArray()); z.closeEntry()
+        }
+        val out = StringBuilder()
+        IncrementProbe.describeZip(zipFile, tmp.newFolder("w"), JdbcOpener, out)
+        val r = out.toString()
+        println(r)
+        assertTrue(r, r.contains("db/msgstore.db") && r.contains("SQLite") && r.contains("- message: 1 صف"))
+        assertTrue(r, r.contains("مفاتيح: version, rows, key"))
+        assertFalse("لا محتوى رسائل", r.contains("سري"))
+    }
+}
