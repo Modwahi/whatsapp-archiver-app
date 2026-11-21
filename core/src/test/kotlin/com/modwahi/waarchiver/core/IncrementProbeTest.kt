@@ -47,7 +47,7 @@ class IncrementProbeZipTest {
         val r = out.toString()
         println(r)
         assertTrue(r, r.contains("db/msgstore.db") && r.contains("SQLite") && r.contains("- message: 1 صف"))
-        assertTrue(r, r.contains("مفاتيح: version, rows, key"))
+        assertFalse(r, r.contains("مفاتيح"))
         assertFalse("لا محتوى رسائل", r.contains("سري"))
     }
 }
