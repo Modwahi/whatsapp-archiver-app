@@ -28,6 +28,7 @@ object IncrementProbe {
         for (f in files) {
             out.appendLine()
             out.appendLine("## ${f.name} — ${f.size} بايت — ${time(f.mtime)}")
+            if (!CURRENT.matches(f.name)) { out.appendLine("(نسخة قديمة مؤرّخة — تخطّيت التفاصيل)"); continue }
             val plain = File(tmp, "probe.bin")
             try {
                 val n = try {
@@ -51,6 +52,9 @@ object IncrementProbe {
         }
         return ArchLog.redact(out.toString())
     }
+
+    private val CURRENT = Regex("""msgstore-increment-\d+\.db\.crypt15""")
+    private val QUOTED_AT = Regex("\"[^\"\n]*@[^\"\n]*\"")
 
     private val JSON_KEY = Regex("\"([A-Za-z_][A-Za-z0-9_.]{0,40})\"\\s*:")
 
@@ -77,14 +81,20 @@ object IncrementProbe {
                         else -> "ثنائي"
                     }
                     out.appendLine("  - ${e.name} — $n بايت — $kind — $hex")
-                    when (kind) {
-                        "SQLite" -> opener.openReadOnly(inner).use { db -> describe(db, out, "      ") }
-                        "JSON", "نص" -> {
-                            val all = inner.readText(Charsets.UTF_8)
-                            val keys = JSON_KEY.findAll(all).map { it.groupValues[1] }.distinct().take(80).toList()
-                            if (keys.isNotEmpty()) out.appendLine("      مفاتيح: ${keys.joinToString(", ")}")
-                            out.appendLine("      أسطر: ${all.count { it == '\n' } + 1}")
+                    when {
+                        e.name == "header.json" || e.name == "sequences.json" -> {
+                            // بيانات وصفية فقط (أعداد وأسماء جداول)؛ نحجب أي قيمة فيها @ احتياطاً
+                            val t = QUOTED_AT.replace(inner.readText(Charsets.UTF_8), "\"<محجوب>\"")
+                            val compact = t.lines().joinToString("") { it.trim() }
+                            out.appendLine("      محتوى: " + compact.take(6000))
                         }
+                        e.name == "messages.bin" -> {
+                            val ps = ProtoSchema()
+                            ps.addDelimited(inner.readBytes())
+                            out.append(ps.report("      "))
+                        }
+                        kind == "SQLite" -> opener.openReadOnly(inner).use { db -> describe(db, out, "      ") }
+                        else -> {} // المفاتيح معروفة من التشخيص السابق
                     }
                 } finally {
                     for (x in listOf("", "-journal", "-wal", "-shm")) File(inner.path + x).delete()
