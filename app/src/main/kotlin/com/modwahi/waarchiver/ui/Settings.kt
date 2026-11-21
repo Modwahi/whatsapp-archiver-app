@@ -185,6 +185,8 @@ fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHist
             Column {
                 SettingRow(Icons.Rounded.History, "سجل التشغيلات", "آخر ${vm.history.size} تشغيلاً بالتفاصيل", onClick = openHistory, trailing = chevron)
                 SettingRow(Icons.Rounded.Description, "تصدير السجل", "ملف نصي للمطوّر — لا يحتوي المفتاح أبداً", onClick = { a.exportLogs() })
+                SettingRow(Icons.Rounded.Info, "تشخيص النسخ التزايدية",
+                    "يصف بنية ملفات msgstore-increment للمطوّر — بدون نصوص الرسائل", onClick = { vm.probeIncrements() }, trailing = chevron)
                 SettingRow(Icons.Rounded.Info, "الإصدار والتحديثات",
                     "الإصدار الحالي ${BuildConfig.VERSION_NAME}" + when {
                         vm.updateState == "checking" -> " — جارٍ الفحص…"
@@ -194,6 +196,15 @@ fun SettingsScreen(vm: AppViewModel, a: Actions, openNames: () -> Unit, openHist
             }
         }
         Spacer(Modifier.size(16.dp))
+    }
+
+    vm.probeText?.let { text ->
+        val clip = LocalClipboardManager.current
+        AlertDialog(onDismissRequest = { vm.probeText = null },
+            confirmButton = { TextButton(onClick = { clip.setText(AnnotatedString(text)); vm.message = "تم النسخ ✓" }) { Text("نسخ") } },
+            dismissButton = { TextButton(onClick = { vm.probeText = null }) { Text("إغلاق") } },
+            title = { Text("تشخيص النسخ التزايدية") },
+            text = { Text(text, Modifier.verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) })
     }
 
     val close = { dialog = Dialog.NONE }

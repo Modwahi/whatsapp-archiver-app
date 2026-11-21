@@ -194,7 +194,7 @@ object Crypt15 {
      * size هو حجم الملف المشفر كاملاً. عند أي فشل يُحذف الناتج الجزئي.
      */
     fun decrypt(input: InputStream, size: Long, output: File, keyHex: String,
-                onProgress: ((Double) -> Unit)? = null): Long {
+                onProgress: ((Double) -> Unit)? = null, expectSqlite: Boolean = true): Long {
         output.parentFile?.mkdirs()
         var ok = false
         var written = 0L
@@ -240,7 +240,7 @@ object Crypt15 {
                                 if (isFirst) "المفتاح لا يطابق ملف النسخة الاحتياطية" else "بيانات النسخة تالفة (zlib)"
                             )
                         }
-                        if (firstOut && headLen >= 6) {
+                        if (expectSqlite && firstOut && headLen >= 6) {
                             for (k in 0 until 6) if (head[k] != SQLITE_MAGIC[k]) {
                                 throw DecryptError("المفتاح لا يطابق ملف النسخة الاحتياطية")
                             }
@@ -272,7 +272,7 @@ object Crypt15 {
                     if (!inf.finished()) throw DecryptError("النسخة الاحتياطية مقطوعة (ضغط zlib غير مكتمل)")
                 }
             }
-            output.inputStream().use { check ->
+            if (expectSqlite) output.inputStream().use { check ->
                 if (!readFully(check, SQLITE_MAGIC.size).contentEquals(SQLITE_MAGIC)) {
                     throw DecryptError("الناتج ليس قاعدة SQLite")
                 }

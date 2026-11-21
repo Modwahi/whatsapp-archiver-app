@@ -412,6 +412,7 @@ fun runArchive(
                 return@with null
             }
         }
+        backup?.let { log.info("ملف النسخة المستخدم: ${it.name}") }
         summary.backupAgeHours = mtime?.let { (now - it) / 3600 }
         summary.backupAgeHours?.let { age ->
             if (age > cfg.staleBackupHours) {

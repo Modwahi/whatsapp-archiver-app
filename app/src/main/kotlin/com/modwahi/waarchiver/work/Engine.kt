@@ -145,7 +145,7 @@ class Engine(private val context: Context) {
 
     /** فك تجريبي سريع لأول جزء من النسخة. */
     fun verifyKey(key: String) {
-        val b = source().backup() ?: throw RunError("لم أجد ملف النسخة الاحتياطية Databases/msgstore.db.crypt15 في المجلد المختار.")
+        val b = source().backup() ?: throw RunError("لم أجد ملف النسخة الاحتياطية (msgstore*.db.crypt15) في مجلد Databases.")
         b.open().use { Crypt15.verifyKey(it, key) }
     }
 
@@ -160,6 +160,15 @@ class Engine(private val context: Context) {
         if (System.currentTimeMillis() / 1000.0 - b.mtime < com.modwahi.waarchiver.core.MIN_BACKUP_AGE_S)
             return "النسخة الاحتياطية كُتبت للتو — سأحاول بعد قليل"
         return null
+    }
+
+    /** تشخيص ملفات النسخ التزايدية: بنية فقط بدون محتوى الرسائل. */
+    fun probeIncrements(): String {
+        val src = source()
+        val r = com.modwahi.waarchiver.core.IncrementProbe.report(src.backup(), src.increments(), key(),
+            File(paths.tmp, "probe"), AndroidSql)
+        log.info(r)
+        return r
     }
 
     fun backupMtimeMs(): Long? = runCatching { source().backup()?.mtime?.let { (it * 1000).toLong() } }.getOrNull()
