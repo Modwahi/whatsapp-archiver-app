@@ -155,6 +155,17 @@ fun <T> withDecryptedDb(source: SourceFs, paths: Paths, key: String, log: ArchLo
         val out = src.open().use { Crypt15.decrypt(it, size, dbPath, key, onProgress) }
         log.info("تم الفك (${out / (1 shl 20)}MB) في ${pyFixed((System.nanoTime() - t) / 1e9, 0)} ثانية")
         db = WaDb(dbPath, opener)
+        val chain = runCatching { source.backupSet()?.increments }.getOrNull().orEmpty()
+        if (chain.isNotEmpty()) {
+            // خطأ في الملفات التزايدية لا يُفشل التشغيل: نكمل بالنسخة الكاملة وحدها
+            try {
+                val ov = IncrementOverlay.load(chain, key, File(paths.tmp, "inc"), log)
+                db.overlay = ov
+                log.info("النسخ التزايدية: ${chain.joinToString(", ") { it.name }} — ${ov.messageCount} رسالة")
+            } catch (e: Exception) {
+                log.warning("تعذّر قراءة النسخ التزايدية (${e.message}) — أكمل بالنسخة الكاملة فقط")
+            }
+        }
         return block(db)
     } finally {
         db?.close()
@@ -394,7 +405,7 @@ fun runArchive(
     return RunLock.with(paths.lock) {
         if (cfg.chats.isEmpty()) throw RunError("لم تختر أي محادثة بعد. اختر المحادثات من شاشة «المحادثات».")
         val backup = source.backup()
-        val mtime = backup?.mtime
+        val mtime = runCatching { source.backupSet()?.mtime }.getOrNull() ?: backup?.mtime
         if (scheduled && mtime == null) {
             // لا نكرر تقرير «لا توجد نسخة» كل ساعة: مرة واحدة في اليوم تكفي
             val today = startedAt.toLocalDate().toString()

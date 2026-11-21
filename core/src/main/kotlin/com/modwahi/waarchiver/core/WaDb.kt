@@ -96,6 +96,43 @@ class WaDb(path: File, private val opener: SqlOpener) : AutoCloseable {
     private val pushNames: Map<Long, String>
     private var chatCache: List<ChatInfo>? = null
 
+    /** رسائل النسخ التزايدية فوق هذه القاعدة (إن وُجدت) */
+    var overlay: IncrementOverlay? = null
+        set(v) { field = v; chatCache = null }
+
+    /** @lid (نص) → jid الرقم، من jid_map في القاعدة */
+    private val lidRawMap: Map<String, String> by lazy {
+        if (!has("jid_map", "lid_row_id", "jid_row_id")) return@lazy emptyMap()
+        conn.query("SELECT l.raw_string, j.raw_string FROM jid_map m JOIN jid l ON l._id = m.lid_row_id JOIN jid j ON j._id = m.jid_row_id")
+            .filter { truthy(it[0]) && truthy(it[1]) }.associate { it[0].toString() to it[1].toString() }
+    }
+
+    /** أسماء push بنص الـ jid */
+    private val pushByRaw: Map<String, String> by lazy {
+        if (pushNames.isEmpty()) return@lazy emptyMap()
+        val ids = pushNames.keys
+        val out = HashMap<String, String>()
+        for (chunk in ids.chunked(500)) {
+            for (r in conn.query("SELECT _id, raw_string FROM jid WHERE _id IN (${chunk.joinToString(",")})")) {
+                if (truthy(r[1])) pushNames[r[0].asLong()]?.let { out[r[1].toString()] = it }
+            }
+        }
+        out
+    }
+
+    private val baseMaxRow: Long by lazy {
+        conn.query("SELECT MAX(_id) FROM message").firstOrNull()?.get(0)?.asLong() ?: 0L
+    }
+
+    /** يكمل رسالة من ملف تزايدي: يحوّل @lid للرقم، ويضيف الاسم. */
+    private fun fixOverlay(m: Message): Message {
+        val raw = m.senderJid
+        if (raw.isEmpty() || !raw.endsWith("@lid")) return m
+        val pn = lidRawMap[raw] ?: overlay?.pnOfLid?.get(raw)
+        val name = m.pushName ?: overlay?.lidNames?.get(raw) ?: pushByRaw[raw]
+        return m.copy(senderJid = pn ?: raw, pushName = name)
+    }
+
     init {
         ensureIndex(path, opener)
         try {
@@ -217,7 +254,13 @@ class WaDb(path: File, private val opener: SqlOpener) : AutoCloseable {
                 pushName = r["jid_row"]?.asLong()?.let { pushNames[it] } ?: "",
             )
         }
-        return out.sortedByDescending { it.lastTimestamp }
+        val ov = overlay ?: return out.sortedByDescending { it.lastTimestamp }
+        return out.map { c ->
+            val extra = ov.forChat(c.jid).filter { it.rowId > baseMaxRow }
+            if (extra.isEmpty()) c
+            else c.copy(messageCount = c.messageCount + extra.size,
+                lastTimestamp = maxOf(c.lastTimestamp, extra.maxOf { it.timestamp }))
+        }.sortedByDescending { it.lastTimestamp }
     }
 
     /** قائمة المحادثات مرة واحدة لكل تشغيل (الاستعلام يمر على جدول الرسائل كله). */
@@ -285,10 +328,22 @@ class WaDb(path: File, private val opener: SqlOpener) : AutoCloseable {
             }
         }
         val q = messageSelect + " WHERE " + where.joinToString(" AND ") + " ORDER BY m.timestamp, m._id"
-        return conn.query(q, params).mapNotNull { toMessage(it, chat) }
+        val base = conn.query(q, params).mapNotNull { toMessage(it, chat) }
+        val ov = overlay ?: return base
+        // نفس شروط الاستعلام على رسائل الملفات التزايدية؛ عند تكرار _id النسخة الأحدث تغلب
+        val extra = ov.forChat(chat.jid).filter { m ->
+            val ms = m.timestamp * 1000
+            ms >= sinceMs && (afterRowId == 0L || m.rowId > afterRowId || (recentMs != null && ms >= recentMs))
+        }
+        if (extra.isEmpty()) return base
+        val merged = LinkedHashMap<Long, Message>()
+        for (m in base) merged[m.rowId] = m
+        for (m in extra) merged[m.rowId] = fixOverlay(m).copy(chatJid = chat.jid)
+        return merged.values.sortedWith(compareBy({ it.timestamp }, { it.rowId }))
     }
 
     fun messageByKey(chat: ChatInfo, keyId: String): Message? {
+        overlay?.byKey(chat.jid, keyId)?.let { return fixOverlay(it).copy(chatJid = chat.jid) }
         val q = "$messageSelect WHERE m.chat_row_id = ? AND m.key_id = ?"
         val r = conn.query(q, listOf(chat.rowId, keyId)).firstOrNull() ?: return null
         return toMessage(r, chat)
