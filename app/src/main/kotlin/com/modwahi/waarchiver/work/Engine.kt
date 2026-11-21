@@ -21,6 +21,7 @@ import com.modwahi.waarchiver.core.UploadError
 import com.modwahi.waarchiver.core.Uploader
 import com.modwahi.waarchiver.core.runArchive
 import com.modwahi.waarchiver.core.withDecryptedDb
+import com.modwahi.waarchiver.core.backupSet
 import com.modwahi.waarchiver.data.DRIVE_FOLDER_NAME
 import com.modwahi.waarchiver.data.KeyVault
 import com.modwahi.waarchiver.data.KnownChat
@@ -154,7 +155,7 @@ class Engine(private val context: Context) {
      * يرجع سبب التخطي، أو null إن كان هناك عمل.
      */
     fun scheduledSkipReason(): String? {
-        val b = runCatching { source().backup() }.getOrNull() ?: return null // عدم وجود النسخة يعالجه التشغيل نفسه
+        val b = runCatching { source().backupSet() }.getOrNull() ?: return null // عدم وجود النسخة يعالجه التشغيل نفسه
         val last = com.modwahi.waarchiver.core.State(paths.state).lastBackupMtime
         if (b.mtime <= last) return "لا توجد نسخة احتياطية جديدة منذ آخر أرشفة"
         if (System.currentTimeMillis() / 1000.0 - b.mtime < com.modwahi.waarchiver.core.MIN_BACKUP_AGE_S)
@@ -171,7 +172,7 @@ class Engine(private val context: Context) {
         return r
     }
 
-    fun backupMtimeMs(): Long? = runCatching { source().backup()?.mtime?.let { (it * 1000).toLong() } }.getOrNull()
+    fun backupMtimeMs(): Long? = runCatching { source().backupSet()?.mtime?.let { (it * 1000).toLong() } }.getOrNull()
 
     fun backupAgeHours(): Double? = backupMtimeMs()?.let { (System.currentTimeMillis() - it) / 3_600_000.0 }
 
