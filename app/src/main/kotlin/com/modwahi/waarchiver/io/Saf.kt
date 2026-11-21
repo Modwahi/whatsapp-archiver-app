@@ -58,6 +58,10 @@ class SafSource(private val context: Context, treeUri: Uri) : SourceFs {
     private fun fileAt(rel: String): SourceFile? {
         val clean = rel.trimStart('/')
         val inf = cr.info(docUri("$base/$clean")) ?: return null
+        return wrap(inf, rel)
+    }
+
+    private fun wrap(inf: DocInfo, rel: String): SourceFile? {
         if (inf.mime == Document.MIME_TYPE_DIR) return null
         return object : SourceFile {
             override val name = inf.name
@@ -69,9 +73,29 @@ class SafSource(private val context: Context, treeUri: Uri) : SourceFs {
     }
 
     override val backupDescription: String
-        get() = "${base.substringAfter(':')}/Databases/msgstore.db.crypt15"
+        get() = "${base.substringAfter(':')}/Databases/msgstore*.db.crypt15"
 
-    override fun backup(): SourceFile? = fileAt("Databases/msgstore.db.crypt15")
+    /** أحدث ملف نسخة في Databases (الاسم الثابت أو المؤرّخ). */
+    override fun backup(): SourceFile? {
+        val dirId = "$base/Databases"
+        val q = DocumentsContract.buildChildDocumentsUriUsingTree(tree, dirId)
+        val found = ArrayList<SourceFile>()
+        try {
+            cr.query(q, arrayOf(Document.COLUMN_DOCUMENT_ID, Document.COLUMN_DISPLAY_NAME, Document.COLUMN_SIZE,
+                Document.COLUMN_LAST_MODIFIED, Document.COLUMN_MIME_TYPE), null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val name = c.getString(1) ?: continue
+                    if (!SourceFs.BACKUP_NAME.matches(name)) continue
+                    val inf = DocInfo(DocumentsContract.buildDocumentUriUsingTree(tree, c.getString(0)), name,
+                        if (c.isNull(2)) 0 else c.getLong(2), if (c.isNull(3)) 0 else c.getLong(3), c.getString(4) ?: "")
+                    wrap(inf, "Databases/$name")?.let { found.add(it) }
+                }
+            }
+        } catch (e: Exception) {
+            // لا صلاحية أو لا مجلد: نجرب الاسم الثابت مباشرة
+        }
+        return SourceFs.newest(found.asSequence()) ?: fileAt("Databases/msgstore.db.crypt15")
+    }
 
     override fun media(rel: String): SourceFile? {
         // المسار في القاعدة قد يكون مطلقاً في نسخ قديمة: /storage/emulated/0/.../WhatsApp/Media/...

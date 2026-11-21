@@ -19,8 +19,21 @@ interface SourceFile {
 interface SourceFs {
     /** وصف مكان ملف النسخة لرسائل الخطأ */
     val backupDescription: String
-    /** Databases/msgstore.db.crypt15 أو null إن لم يوجد */
+    /**
+     * أحدث نسخة احتياطية في Databases (حسب وقت التعديل) أو null إن لم توجد.
+     * واتساب قد يكتب النسخة اليومية التلقائية باسم مؤرّخ (msgstore-2026-11-21.1.db.crypt15)
+     * ويترك msgstore.db.crypt15 كما هو، فلا نكتفي بالاسم الثابت.
+     */
     fun backup(): SourceFile?
+
+    companion object {
+        /** msgstore.db.crypt15 أو msgstore-YYYY-MM-DD.N.db.crypt15 */
+        val BACKUP_NAME = Regex("""msgstore(-\d{4}-\d{2}-\d{2}\.\d+)?\.db\.crypt15""")
+        fun newest(files: Sequence<SourceFile>): SourceFile? =
+            files.filter { BACKUP_NAME.matches(it.name) && it.size > 0 }
+                // عند التساوي نفضّل الاسم الثابت
+                .maxWithOrNull(compareBy<SourceFile> { it.mtime }.thenBy { it.name == "msgstore.db.crypt15" })
+    }
     /** ملف وسيط بمساره المسجّل في القاعدة (نسبي لمجلد WhatsApp، أو مطلق). null إن لم يوجد كملف. */
     fun media(rel: String): SourceFile?
 }
@@ -43,8 +56,7 @@ interface Uploader {
 class UploadError(message: String, cause: Throwable? = null) : Exception(message, cause)
 
 class FileSourceFs(private val root: File) : SourceFs {
-    override val backupDescription: String get() = backupFile.path
-    private val backupFile get() = File(root, "Databases/msgstore.db.crypt15")
+    override val backupDescription: String get() = File(root, "Databases/msgstore*.db.crypt15").path
 
     private fun wrap(f: File): SourceFile? = if (!f.isFile) null else object : SourceFile {
         override val name = f.name
@@ -53,7 +65,8 @@ class FileSourceFs(private val root: File) : SourceFs {
         override fun open(): InputStream = f.inputStream()
     }
 
-    override fun backup(): SourceFile? = wrap(backupFile)
+    override fun backup(): SourceFile? =
+        SourceFs.newest((File(root, "Databases").listFiles() ?: emptyArray()).asSequence().mapNotNull { wrap(it) })
     override fun media(rel: String): SourceFile? = wrap(if (rel.startsWith("/")) File(rel) else File(root, rel))
 }
 

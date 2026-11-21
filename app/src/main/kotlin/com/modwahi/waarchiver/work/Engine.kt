@@ -145,7 +145,7 @@ class Engine(private val context: Context) {
 
     /** فك تجريبي سريع لأول جزء من النسخة. */
     fun verifyKey(key: String) {
-        val b = source().backup() ?: throw RunError("لم أجد ملف النسخة الاحتياطية Databases/msgstore.db.crypt15 في المجلد المختار.")
+        val b = source().backup() ?: throw RunError("لم أجد ملف النسخة الاحتياطية (msgstore*.db.crypt15) في مجلد Databases.")
         b.open().use { Crypt15.verifyKey(it, key) }
     }
 

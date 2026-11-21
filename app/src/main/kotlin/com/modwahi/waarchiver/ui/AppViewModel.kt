@@ -279,7 +279,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         waUri = uri.toString()
         val b = src.backup()
         reload()
-        if (b == null) "اخترت المجلد، لكن لم أجد ملف النسخة Databases/msgstore.db.crypt15. فعّل النسخ الاحتياطي المشفّر في واتساب ثم اضغط «نسخ احتياطي»."
+        if (b == null) "اخترت المجلد، لكن لم أجد ملف نسخة (msgstore*.db.crypt15) في مجلد Databases. فعّل النسخ الاحتياطي المشفّر في واتساب ثم اضغط «نسخ احتياطي»."
         else null
     }
 
